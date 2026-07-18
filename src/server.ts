@@ -32,7 +32,11 @@ async function main() {
   console.log(`PenguinChat API + realtime listening on :${config.port}`);
 
   const shutdown = async () => {
+    // Await io.close() and let disconnect handlers settle so in-flight presence
+    // "offline" writes/broadcasts flush before Redis tears down (matches the test
+    // helper). Without this, SIGTERM can drop offline-presence updates.
     io.close();
+    await new Promise((r) => setTimeout(r, 100));
     await app.close();
     await closeRedisClients(redis);
     await pool.end();

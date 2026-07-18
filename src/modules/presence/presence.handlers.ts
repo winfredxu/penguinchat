@@ -41,9 +41,12 @@ export function registerPresenceHandlers(io: Server, deps: PresenceHandlerDeps):
     });
 
     socket.on("presence:heartbeat", () => {
-      // Fire-and-forget is fine here: a silent failure just leaves a stale TTL,
-      // which self-heals on the next beat or on disconnect.
-      void presence.refresh(userId);
+      // A rejected refresh would otherwise become an unhandled rejection and
+      // (under Node's default --unhandled-rejections=throw) crash the process
+      // during a Redis flap. Route it through safe() so failures are logged.
+      safe(async () => {
+        await presence.refresh(userId);
+      });
     });
 
     socket.on("disconnect", () => {
