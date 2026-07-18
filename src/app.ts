@@ -3,6 +3,7 @@ import type { Pool } from "pg";
 import type { Config } from "./config.js";
 import { AppError } from "./lib/errors.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
+import { contactsRoutes } from "./modules/contacts/contacts.routes.js";
 import { registerAuthPlugin } from "./plugins/auth.js";
 import type { SessionRegistry } from "./modules/session-registry/session-registry.js";
 import { NoopSessionRegistry } from "./modules/session-registry/session-registry.js";
@@ -30,6 +31,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
 
   app.get("/health", async () => ({ status: "ok" }));
   app.register(authRoutes, { pool: deps.pool, config: deps.config });
+  app.register(contactsRoutes, { pool: deps.pool, registry });
 
   return app;
 }
