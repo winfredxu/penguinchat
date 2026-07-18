@@ -4,10 +4,11 @@ import { resetDb } from "./helpers/db.js";
 import { runMigrations } from "../src/db/migrate.js";
 
 const pool = makePool();
-const app = makeApp(pool);
+let app: Awaited<ReturnType<typeof makeApp>>;
 
 beforeAll(async () => {
   await runMigrations(pool);
+  app = await makeApp(pool);
 });
 beforeEach(async () => {
   await resetDb(pool);

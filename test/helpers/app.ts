@@ -19,6 +19,6 @@ export function makePool(): Pool {
   return new Pool({ connectionString: TEST_DB_URL });
 }
 
-export function makeApp(pool: Pool) {
+export async function makeApp(pool: Pool) {
   return buildApp({ pool, config: testConfig });
 }

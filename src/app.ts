@@ -1,4 +1,6 @@
 import Fastify, { FastifyInstance } from "fastify";
+import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import type { Pool } from "pg";
 import type { Config } from "./config.js";
 import { AppError } from "./lib/errors.js";
@@ -14,8 +16,11 @@ export interface AppDeps {
   registry?: SessionRegistry;
 }
 
-export function buildApp(deps: AppDeps): FastifyInstance {
+export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
+
+  await app.register(cors, { origin: true });
+  await app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
 
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof AppError) {
