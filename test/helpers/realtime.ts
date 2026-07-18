@@ -1,14 +1,18 @@
 import { io as ioc, type Socket as ClientSocket } from "socket.io-client";
 import { Server } from "socket.io";
+import type { Pool } from "pg";
 import { makePool, testConfig } from "./app.js";
 import { resetDb } from "./db.js";
 import { runMigrations } from "../../src/db/migrate.js";
 import { createRedisClients, closeRedisClients } from "../../src/realtime/redis.js";
+import { PresenceService } from "../../src/modules/presence/presence.service.js";
 
 export interface RealtimeStack {
   app: Awaited<ReturnType<typeof import("../../src/app.js").buildApp>>;
   io: Server;
   port: number;
+  pool: Pool;
+  presence: PresenceService;
   cleanup: () => Promise<void>;
 }
 
@@ -21,14 +25,25 @@ export async function makeRealtimeStack(): Promise<RealtimeStack> {
   const app = await buildApp({ pool, config: testConfig });
   await app.listen({ port: 0, host: "127.0.0.1" });
   const port = app.server.address().port;
+  const presence = new PresenceService(redis.general, 30);
   const { createGateway } = await import("../../src/realtime/gateway.js");
-  const io = createGateway(app.server, { config: testConfig, pub: redis.pub, sub: redis.sub });
+  const io = createGateway(app.server, {
+    config: testConfig,
+    pub: redis.pub,
+    sub: redis.sub,
+    presence,
+    pool,
+  });
   return {
     app,
     io,
     port,
+    pool,
+    presence,
     cleanup: async () => {
-      io.close();
+      await io.close();
+      // Allow in-flight disconnect handlers to finish before closing redis.
+      await new Promise((r) => setTimeout(r, 100));
       await app.close();
       await closeRedisClients(redis);
       await pool.end();
@@ -47,16 +62,16 @@ export function socketClient(port: number, token: string): Promise<ClientSocket>
   });
 }
 
-/** Register a user via REST and return { id, accessToken }. */
+/** Register a user via REST and return { id, accessToken, username }. */
 export async function registerUser(
   app: RealtimeStack["app"],
   username: string
-): Promise<{ id: string; accessToken: string }> {
+): Promise<{ id: string; accessToken: string; username: string }> {
   const res = await app.inject({
     method: "POST",
     url: "/auth/register",
     payload: { username, display_name: username, password: "noot123" },
   });
   const body = res.json();
-  return { id: body.user.id, accessToken: body.tokens.accessToken };
+  return { id: body.user.id, accessToken: body.tokens.accessToken, username };
 }
