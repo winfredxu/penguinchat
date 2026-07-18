@@ -17,7 +17,7 @@
 - **Input validation at every boundary** — every REST payload is schema-validated (zod) before touching a domain service.
 - Friendships stored **one row per pair**, `user_a < user_b` by uuid, to avoid duplicate/asymmetric rows.
 - `conversation` id is the **deterministic UUIDv5** of the sorted user pair (defined here, consumed by messaging in Plan 2).
-- Deterministic UUIDv5 namespace constant (fixed, never regenerate): `6f9619ff-8b86-d011-b42d-00c04fc964ff`.
+- Deterministic UUIDv5 namespace constant (fixed, never regenerate): `6f9619ff-8b86-1011-b42d-00c04fc964ff`. (Corrected during Task 2 — the original `...d011...` had an out-of-range version nibble and was rejected by `uuidv5`.)
 - Rate-limit auth endpoints (defined as a shared limiter; tuned in a later hardening pass).
 
 ---
@@ -420,7 +420,7 @@ git commit -m "feat: scaffold Fastify backend with Docker, config, health check"
 import { v5 as uuidv5 } from "uuid";
 
 // Fixed namespace — never regenerate (see Global Constraints).
-const NAMESPACE = "6f9619ff-8b86-d011-b42d-00c04fc964ff";
+const NAMESPACE = "6f9619ff-8b86-1011-b42d-00c04fc964ff";
 
 /** Deterministic conversation id for a user pair, independent of argument order. */
 export function conversationId(a: string, b: string): string {
