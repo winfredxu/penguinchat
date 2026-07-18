@@ -1,6 +1,7 @@
 export interface Config {
   port: number;
   databaseUrl: string;
+  redisUrl: string;
   jwtAccessSecret: string;
   jwtRefreshSecret: string;
   accessTtl: string;
@@ -17,6 +18,7 @@ export function loadConfig(): Config {
   return {
     port: Number(process.env.PORT ?? 3000),
     databaseUrl: required("DATABASE_URL"),
+    redisUrl: required("REDIS_URL"),
     jwtAccessSecret: required("JWT_ACCESS_SECRET"),
     jwtRefreshSecret: required("JWT_REFRESH_SECRET"),
     accessTtl: process.env.ACCESS_TTL ?? "15m",
