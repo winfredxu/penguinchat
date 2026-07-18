@@ -4,10 +4,13 @@ import type { Config } from "./config.js";
 import { AppError } from "./lib/errors.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
 import { registerAuthPlugin } from "./plugins/auth.js";
+import type { SessionRegistry } from "./modules/session-registry/session-registry.js";
+import { NoopSessionRegistry } from "./modules/session-registry/session-registry.js";
 
 export interface AppDeps {
   pool: Pool;
   config: Config;
+  registry?: SessionRegistry;
 }
 
 export function buildApp(deps: AppDeps): FastifyInstance {
@@ -20,6 +23,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
     reply.code(500).send({ error: "internal", message: "Internal server error" });
   });
+
+  const registry = deps.registry ?? new NoopSessionRegistry();
 
   registerAuthPlugin(app, deps.config);
 
