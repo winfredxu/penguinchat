@@ -16,24 +16,38 @@ async function friendIds(pool: Pool, userId: string): Promise<string[]> {
 export function registerPresenceHandlers(io: Server, deps: PresenceHandlerDeps): void {
   const { presence, pool } = deps;
 
+  // Socket.IO does not await async event listeners, so a rejected promise inside
+  // a listener becomes an unhandled rejection. Each handler wraps its async work
+  // in an IIFE with a .catch so failures (postgres/redis flap) are logged rather
+  // than silently dropped.
+  const safe = (fn: () => Promise<void>): void => {
+    fn().catch((err) => {
+      // Structured logging lands with FU-6; until then, surface to stderr.
+      // eslint-disable-next-line no-console
+      console.error("presence handler error:", err);
+    });
+  };
+
   io.on("connection", (socket: Socket) => {
     const userId = socket.data.userId as string;
     socket.join(userId);
 
-    void (async () => {
+    safe(async () => {
       await presence.setOnline(userId);
       const friends = await friendIds(pool, userId);
       for (const fid of friends) {
         io.to(fid).emit("presence:update", { userId, status: "online" });
       }
-    })();
+    });
 
     socket.on("presence:heartbeat", () => {
+      // Fire-and-forget is fine here: a silent failure just leaves a stale TTL,
+      // which self-heals on the next beat or on disconnect.
       void presence.refresh(userId);
     });
 
     socket.on("disconnect", () => {
-      void (async () => {
+      safe(async () => {
         const remaining = await io.in(userId).fetchSockets();
         if (remaining.length > 0) return; // another device still online
         await presence.clear(userId);
@@ -41,7 +55,7 @@ export function registerPresenceHandlers(io: Server, deps: PresenceHandlerDeps):
         for (const fid of friends) {
           io.to(fid).emit("presence:update", { userId, status: "offline" });
         }
-      })();
+      });
     });
   });
 }
