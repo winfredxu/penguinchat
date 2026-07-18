@@ -8,12 +8,12 @@ test("notify before attach is a silent no-op (does not throw)", async () => {
   ).resolves.toBeUndefined();
 });
 
-test("attach stores the io server without error", () => {
+test("attach stores the io server without error", async () => {
   const registry = new RedisSessionRegistry();
   // attach accepts a Server; pass a minimal stand-in typed as the interface expects.
   // (Full delivery is exercised in test/gateway.auth.test.ts, Task 3.)
   const fakeIo = { to: () => ({ emit: () => {} }) } as unknown as import("socket.io").Server;
   registry.attach(fakeIo);
   // After attach, notify routes through io.to().emit() — verify it still resolves.
-  expect(registry.notify("u", "e", {})).resolves.toBeUndefined();
+  await expect(registry.notify("u", "e", {})).resolves.toBeUndefined();
 });
