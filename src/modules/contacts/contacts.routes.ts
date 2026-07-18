@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import { AppError } from "../../lib/errors.js";
 import type { SessionRegistry } from "../session-registry/session-registry.js";
+import type { PresenceReader } from "../presence/presence.service.js";
 import { sendRequestSchema } from "./contacts.schema.js";
 import {
   acceptRequest,
@@ -14,13 +15,14 @@ import {
 interface Opts {
   pool: Pool;
   registry: SessionRegistry;
+  presence: PresenceReader;
 }
 
 export async function contactsRoutes(app: FastifyInstance, opts: Opts) {
-  const { pool, registry } = opts;
+  const { pool, registry, presence } = opts;
 
   app.get("/contacts", { preHandler: app.requireAuth }, async (req) => {
-    return listContacts(pool, req.userId!);
+    return listContacts(pool, presence, req.userId!);
   });
 
   app.get("/friend-requests", { preHandler: app.requireAuth }, async (req) => {

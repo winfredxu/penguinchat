@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import { AppError } from "../../lib/errors.js";
 import type { SessionRegistry } from "../session-registry/session-registry.js";
+import type { PresenceReader, PresenceStatus } from "../presence/presence.service.js";
 import { findById, findByUsername, type PublicUser } from "../auth/auth.repo.js";
 import {
   areFriends,
@@ -66,10 +67,18 @@ export async function declineRequest(
   await setRequestStatus(pool, requestId, "declined");
 }
 
-export async function listContacts(pool: Pool, userId: string): Promise<Contact[]> {
+export async function listContacts(
+  pool: Pool,
+  presence: PresenceReader,
+  userId: string
+): Promise<Contact[]> {
   const friends = await listFriends(pool, userId);
-  // Presence is hardcoded offline in Plan 1; Plan 2 populates from Redis.
-  return friends.map((f) => ({ ...f, presence: "offline" as const }));
+  if (friends.length === 0) return [];
+  const statusMap = await presence.getMany(friends.map((f) => f.id));
+  return friends.map((f) => ({
+    ...f,
+    presence: statusMap.get(f.id) ?? ("offline" as PresenceStatus),
+  }));
 }
 
 // Re-export so routes need only import this module.

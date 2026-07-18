@@ -9,11 +9,14 @@ import { contactsRoutes } from "./modules/contacts/contacts.routes.js";
 import { registerAuthPlugin } from "./plugins/auth.js";
 import type { SessionRegistry } from "./modules/session-registry/session-registry.js";
 import { NoopSessionRegistry } from "./modules/session-registry/session-registry.js";
+import type { PresenceReader } from "./modules/presence/presence.service.js";
+import { NoopPresenceService } from "./modules/presence/presence.service.js";
 
 export interface AppDeps {
   pool: Pool;
   config: Config;
   registry?: SessionRegistry;
+  presence?: PresenceReader;
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
@@ -31,12 +34,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   const registry = deps.registry ?? new NoopSessionRegistry();
+  const presence = deps.presence ?? new NoopPresenceService();
 
   registerAuthPlugin(app, deps.config);
 
   app.get("/health", async () => ({ status: "ok" }));
   app.register(authRoutes, { pool: deps.pool, config: deps.config });
-  app.register(contactsRoutes, { pool: deps.pool, registry });
+  app.register(contactsRoutes, { pool: deps.pool, registry, presence });
 
   return app;
 }
