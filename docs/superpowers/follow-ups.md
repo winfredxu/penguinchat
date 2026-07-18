@@ -65,3 +65,44 @@ concurrent replicas would hit a duplicate-key error rather than silently no-op).
 Acceptable for now; revisit if migrations ever run from multiple replicas at boot
 (now that the server self-migrates, FU-10's migration half is worth a glance before
 horizontal scaling).
+
+## From the Plan 2a final review
+
+### FU-11 — Disconnect/clear race can leave presence stale (Important-ish)
+`src/modules/presence/presence.handlers.ts` disconnect handler: between
+`io.in(userId).fetchSockets()` resolving (0 sockets) and `presence.clear(userId)`
+running, a new socket for the same user can connect and `setOnline` the key — then
+`clear` deletes the just-set key. The user is connected but appears offline to
+friends. Heartbeat does NOT self-heal because `refresh()` uses `EXPIRE` (no-op on an
+absent key) rather than `SET ... EX`. Fix: make `refresh()` idempotent-recreate —
+`SET presence:{userId} online EX {ttl}` — so any racing clear is undone by the next
+heartbeat (~25s) even without a reconnect. Safe because only connected clients emit
+heartbeats, so a ghost socket can't resurrect presence.
+
+### FU-12 — Multi-instance fan-out untested (Important for prod)
+`@socket.io/redis-adapter` is wired and `io.in(userId).fetchSockets()` is
+cluster-aware, but all Plan 2a tests use a single `io` instance. Add a two-instance
+test (two `io` servers sharing one Redis adapter, a socket on each, assert a
+`presence:update` / `notify` emitted on instance A reaches a socket on instance B)
+before this is load-bearing in production.
+
+### FU-13 — `verifyAccess` return is an unchecked cast (Minor)
+`src/realtime/gateway.ts`: `const { sub } = verifyAccess(...)` — if a validly-signed
+access token ever lacks `sub`, `socket.data.userId` is `undefined` and the socket
+joins a room literally named `"undefined"`. Not exploitable without the secret, but
+add `if (!sub) return next(new Error("unauthorized"))` as defense-in-depth.
+
+### FU-14 — `closeRedisClients` uses `Promise.all` (Minor)
+`src/realtime/redis.ts`: if one `quit()` rejects (client already in error state),
+`Promise.all` rejects and the other two quits aren't awaited, leaking connections.
+Use `Promise.allSettled`.
+
+### FU-15 — Socket.IO CORS `origin: "*"` (Minor)
+`src/realtime/gateway.ts`: acceptable for 2a (JWT-in-handshake, not cookie-based, so
+`*` widens no attack surface), but make it env-driven before the Plan 3 client ships
+to production. Ties to FU-6 / prod-readiness.
+
+### FU-16 — `PresenceHandlerDeps` couples to concrete `PresenceService` (Minor)
+`src/modules/presence/presence.handlers.ts` types the dep as the concrete class, not
+an interface. Fine for 2a (the handler needs write methods); if 2b wants to swap a
+presence impl in tests, introduce a `PresenceWriter` interface.
