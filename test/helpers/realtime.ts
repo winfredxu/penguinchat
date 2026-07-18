@@ -21,7 +21,8 @@ export async function makeRealtimeStack(): Promise<RealtimeStack> {
   const app = await buildApp({ pool, config: testConfig });
   await app.listen({ port: 0, host: "127.0.0.1" });
   const port = app.server.address().port;
-  const io = new Server(app.server, { cors: { origin: "*" } });
+  const { createGateway } = await import("../../src/realtime/gateway.js");
+  const io = createGateway(app.server, { config: testConfig, pub: redis.pub, sub: redis.sub });
   return {
     app,
     io,
