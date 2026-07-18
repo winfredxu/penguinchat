@@ -1,0 +1,373 @@
+<title>PenguinChat — UI Mockup</title>
+<style>
+  :root {
+    /* palette — derived from QQ's penguin + sky identity */
+    --sky: #12B7F5;
+    --sky-deep: #0A84C7;
+    --scarf: #FF6B4A;            /* the one warm accent */
+    --ink: #17232E;
+    --slate: #6B7C8C;
+    --cloud: #EEF3F7;            /* app ground, hue-biased toward sky */
+    --snow: #FFFFFF;
+    --line: #E1E8EF;
+    --bubble-in: #FFFFFF;
+    --bubble-out: linear-gradient(160deg, #33C2F7, #12B7F5);
+    --rail: #F3F7FB;
+    --shadow: 0 1px 2px rgba(23,35,46,.06), 0 8px 24px rgba(23,35,46,.06);
+    --font-round: ui-rounded, "SF Pro Rounded", "Segoe UI", "Baloo 2", system-ui, sans-serif;
+    --font-body: -apple-system, system-ui, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --sky: #35C2F7;
+      --sky-deep: #0E9AD4;
+      --scarf: #FF7A5C;
+      --ink: #E7EEF5;
+      --slate: #93A4B4;
+      --cloud: #0E1621;
+      --snow: #16222E;
+      --line: #243444;
+      --bubble-in: #1E2C3A;
+      --bubble-out: linear-gradient(160deg, #1FA9E6, #1188C4);
+      --rail: #121C27;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 28px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --sky:#12B7F5; --sky-deep:#0A84C7; --scarf:#FF6B4A; --ink:#17232E; --slate:#6B7C8C;
+    --cloud:#EEF3F7; --snow:#FFFFFF; --line:#E1E8EF; --bubble-in:#FFFFFF;
+    --bubble-out:linear-gradient(160deg,#33C2F7,#12B7F5); --rail:#F3F7FB;
+    --shadow:0 1px 2px rgba(23,35,46,.06), 0 8px 24px rgba(23,35,46,.06);
+  }
+  :root[data-theme="dark"] {
+    --sky:#35C2F7; --sky-deep:#0E9AD4; --scarf:#FF7A5C; --ink:#E7EEF5; --slate:#93A4B4;
+    --cloud:#0E1621; --snow:#16222E; --line:#243444; --bubble-in:#1E2C3A;
+    --bubble-out:linear-gradient(160deg,#1FA9E6,#1188C4); --rail:#121C27;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 28px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--cloud); color: var(--ink);
+    font-family: var(--font-body);
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 28px 16px 40px;
+  }
+  .caption { color: var(--slate); font-size: 13px; margin: 0 0 16px; letter-spacing:.02em; }
+  .caption b { color: var(--ink); font-family: var(--font-round); }
+
+  /* ---- window shell ---- */
+  .window {
+    width: min(1040px, 100%); height: 680px; background: var(--snow);
+    border-radius: 14px; box-shadow: var(--shadow); border: 1px solid var(--line);
+    overflow: hidden; display: grid; grid-template-rows: 38px 1fr;
+  }
+  .titlebar {
+    display: flex; align-items: center; gap: 10px; padding: 0 14px;
+    background: linear-gradient(90deg, var(--sky), var(--sky-deep));
+    color: #fff;
+  }
+  .lights { display: flex; gap: 8px; }
+  .lights span { width: 12px; height: 12px; border-radius: 50%; background: rgba(255,255,255,.55); }
+  .lights span:first-child { background: #FF5F57; }
+  .lights span:nth-child(2) { background: #FEBC2E; }
+  .lights span:nth-child(3) { background: #28C840; }
+  .titlebar .brand {
+    margin-left: 4px; font-family: var(--font-round); font-weight: 700;
+    letter-spacing: .01em; font-size: 14px; display:flex; align-items:center; gap:7px;
+  }
+  .titlebar .spacer { flex: 1; }
+  .win-ctl { display:flex; gap:16px; opacity:.9; font-size:13px; }
+
+  .body { display: grid; grid-template-columns: 66px 300px 1fr; min-height: 0; }
+
+  /* ---- icon rail ---- */
+  .rail {
+    background: var(--rail); border-right: 1px solid var(--line);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 16px 0; gap: 6px;
+  }
+  .me-avatar { position: relative; margin-bottom: 14px; }
+  .avatar {
+    border-radius: 50%; display: grid; place-items: center;
+    font-family: var(--font-round); font-weight: 700; color: #fff; user-select: none;
+  }
+  .a-44 { width: 44px; height: 44px; font-size: 17px; }
+  .a-40 { width: 40px; height: 40px; font-size: 15px; }
+  .a-38 { width: 38px; height: 38px; font-size: 14px; }
+  .pulse::after {
+    content: ""; position: absolute; inset: -4px; border-radius: 50%;
+    border: 2px solid var(--sky); opacity: .55;
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%,100%{ transform: scale(1); opacity:.5 } 50%{ transform: scale(1.12); opacity:0 } }
+  .dot {
+    position: absolute; right: -1px; bottom: -1px; width: 12px; height: 12px;
+    border-radius: 50%; border: 2px solid var(--rail);
+  }
+  .dot.on { background: #35D07F; } .dot.away { background: #FFB020; } .dot.off { background: #9AA7B4; }
+
+  .nav-btn {
+    width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+    color: var(--slate); cursor: pointer; border: none; background: transparent;
+  }
+  .nav-btn svg { width: 22px; height: 22px; }
+  .nav-btn.active { background: color-mix(in srgb, var(--sky) 16%, transparent); color: var(--sky); }
+  .nav-btn:hover:not(.active) { background: color-mix(in srgb, var(--sky) 8%, transparent); }
+  .rail .grow { flex: 1; }
+
+  /* ---- conversation list ---- */
+  .list { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--snow); }
+  .profile {
+    background: linear-gradient(135deg, var(--sky), var(--sky-deep));
+    color: #fff; padding: 16px 16px 18px; display: flex; align-items: center; gap: 12px;
+  }
+  .profile .avatar { background: rgba(255,255,255,.22); backdrop-filter: blur(2px); }
+  .profile .meta { min-width: 0; }
+  .profile .name { font-family: var(--font-round); font-weight: 700; font-size: 16px; }
+  .profile .sig { font-size: 12px; opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .profile .qid { font-family: var(--font-mono); font-size: 11px; opacity: .8; margin-top: 3px; }
+
+  .search { padding: 10px 12px; }
+  .search input {
+    width: 100%; border: 1px solid var(--line); background: var(--cloud); color: var(--ink);
+    border-radius: 9px; padding: 8px 12px; font-size: 13px; font-family: var(--font-body);
+  }
+  .search input::placeholder { color: var(--slate); }
+  .search input:focus { outline: 2px solid color-mix(in srgb, var(--sky) 50%, transparent); outline-offset: 0; border-color: transparent; }
+
+  .convos { overflow-y: auto; flex: 1; padding: 0 8px 8px; }
+  .group-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--slate); padding: 10px 10px 6px; font-weight: 600; }
+  .convo {
+    display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: center;
+    padding: 9px 10px; border-radius: 10px; cursor: pointer;
+  }
+  .convo:hover { background: var(--cloud); }
+  .convo.active { background: color-mix(in srgb, var(--sky) 12%, transparent); }
+  .convo .avwrap { position: relative; }
+  .convo .top { display: flex; justify-content: space-between; gap: 8px; }
+  .convo .cname { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .convo .time { font-size: 11px; color: var(--slate); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .convo .preview { font-size: 12.5px; color: var(--slate); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .badge {
+    min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--scarf);
+    color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .col-r { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+
+  /* ---- chat panel ---- */
+  .chat { display: flex; flex-direction: column; min-height: 0; background: var(--cloud); }
+  .chat-head {
+    display: flex; align-items: center; gap: 12px; padding: 13px 20px;
+    background: var(--snow); border-bottom: 1px solid var(--line);
+  }
+  .chat-head .name { font-family: var(--font-round); font-weight: 700; font-size: 15px; }
+  .chat-head .status { font-size: 12px; color: #35D07F; display: flex; align-items: center; gap: 5px; }
+  .chat-head .spacer { flex: 1; }
+  .chat-head .tool { color: var(--slate); cursor: pointer; }
+  .chat-head .tool svg { width: 19px; height: 19px; display:block; }
+
+  .stream { flex: 1; overflow-y: auto; padding: 22px 26px; display: flex; flex-direction: column; gap: 14px; }
+  .daydiv { align-self: center; font-size: 11px; color: var(--slate); background: color-mix(in srgb, var(--slate) 14%, transparent); padding: 3px 12px; border-radius: 20px; }
+  .row { display: flex; gap: 10px; max-width: 74%; }
+  .row.out { align-self: flex-end; flex-direction: row-reverse; }
+  .bubble {
+    padding: 9px 13px; border-radius: 14px; font-size: 14px; line-height: 1.5;
+    box-shadow: var(--shadow);
+  }
+  .row.in .bubble { background: var(--bubble-in); border-top-left-radius: 5px; }
+  .row.out .bubble { background: var(--bubble-out); color: #fff; border-top-right-radius: 5px; }
+  .meta-line { font-size: 10.5px; color: var(--slate); margin-top: 5px; font-variant-numeric: tabular-nums; }
+  .row.out .meta-line { text-align: right; }
+  .tick { color: var(--sky); }
+
+  .typing { display: flex; gap: 4px; align-items: center; padding: 4px 2px; }
+  .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--slate); animation: blink 1.2s infinite; }
+  .typing i:nth-child(2){ animation-delay:.2s } .typing i:nth-child(3){ animation-delay:.4s }
+  @keyframes blink { 0%,60%,100%{ opacity:.25; transform: translateY(0)} 30%{ opacity:1; transform: translateY(-3px)} }
+
+  .composer { background: var(--snow); border-top: 1px solid var(--line); padding: 10px 16px 14px; }
+  .comp-tools { display: flex; gap: 16px; color: var(--slate); padding: 2px 2px 8px; }
+  .comp-tools svg { width: 19px; height: 19px; cursor: pointer; }
+  .comp-tools svg:hover { color: var(--sky); }
+  .comp-row { display: flex; gap: 12px; align-items: flex-end; }
+  .comp-row textarea {
+    flex: 1; resize: none; border: none; background: transparent; color: var(--ink);
+    font-family: var(--font-body); font-size: 14px; line-height: 1.5; height: 46px; padding: 6px 2px;
+  }
+  .comp-row textarea:focus { outline: none; }
+  .comp-row textarea::placeholder { color: var(--slate); }
+  .send {
+    border: none; cursor: pointer; color: #fff; font-family: var(--font-round); font-weight: 700;
+    background: linear-gradient(160deg, var(--scarf), #F04E2C); padding: 9px 20px; border-radius: 10px;
+    font-size: 13px; box-shadow: 0 6px 16px color-mix(in srgb, var(--scarf) 45%, transparent);
+  }
+  .send:hover { filter: brightness(1.05); }
+  .send:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pulse::after, .typing i { animation: none; }
+  }
+  @media (max-width: 720px) {
+    .body { grid-template-columns: 66px 1fr; }
+    .chat { display: none; }
+  }
+</style>
+
+<p class="caption"><b>PenguinChat</b> · v1 core-chat window — friends list, presence pulse, 1:1 messaging. Toggle your theme to see both.</p>
+
+<div class="window">
+  <div class="titlebar">
+    <div class="lights"><span></span><span></span><span></span></div>
+    <div class="brand">🐧 PenguinChat</div>
+    <div class="spacer"></div>
+    <div class="win-ctl">⚊ ▢ ✕</div>
+  </div>
+
+  <div class="body">
+    <!-- icon rail -->
+    <nav class="rail">
+      <div class="me-avatar pulse">
+        <div class="avatar a-44" style="background:linear-gradient(160deg,#7C5CFF,#5B7CFF)">阿</div>
+        <span class="dot on"></span>
+      </div>
+      <button class="nav-btn active" title="Messages" aria-label="Messages">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.4A8 8 0 1 1 21 12Z"/></svg>
+      </button>
+      <button class="nav-btn" title="Contacts" aria-label="Contacts">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16 6.5a3 3 0 0 1 0 5.5M17 19a5.5 5.5 0 0 0-2-4.3"/></svg>
+      </button>
+      <button class="nav-btn" title="Spaces" aria-label="Spaces">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>
+      </button>
+      <div class="grow"></div>
+      <button class="nav-btn" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3H9.8l-.4 2.5a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.5h4.4l.4-2.5a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z"/></svg>
+      </button>
+    </nav>
+
+    <!-- conversation list -->
+    <section class="list">
+      <div class="profile">
+        <div class="avatar a-44">阿</div>
+        <div class="meta">
+          <div class="name">阿温</div>
+          <div class="sig">今天也要元气满满 🐧</div>
+          <div class="qid">PC 10086420</div>
+        </div>
+      </div>
+      <div class="search"><input placeholder="Search friends and messages" aria-label="Search"></div>
+      <div class="convos">
+        <div class="group-label">Online · 3</div>
+
+        <div class="convo active">
+          <div class="avwrap"><div class="avatar a-40" style="background:linear-gradient(160deg,#FF9A6B,#FF6B4A)">林</div><span class="dot on"></span></div>
+          <div><div class="top"><span class="cname">林晓</span></div><div class="preview">这个蓝色好看！就用这个</div></div>
+          <div class="col-r"><span class="time">10:26</span></div>
+        </div>
+
+        <div class="convo">
+          <div class="avwrap"><div class="avatar a-40" style="background:linear-gradient(160deg,#4ECB8B,#28A76A)">妈</div><span class="dot on"></span></div>
+          <div><div class="top"><span class="cname">妈妈</span></div><div class="preview">记得吃饭，别老熬夜</div></div>
+          <div class="col-r"><span class="time">09:48</span><span class="badge">2</span></div>
+        </div>
+
+        <div class="convo">
+          <div class="avwrap"><div class="avatar a-40" style="background:linear-gradient(160deg,#5B7CFF,#3D5AE0)">雷</div><span class="dot on"></span></div>
+          <div><div class="top"><span class="cname">李雷</span></div><div class="preview">你: 收到，晚点回你</div></div>
+          <div class="col-r"><span class="time">昨天</span></div>
+        </div>
+
+        <div class="group-label">Away · 1</div>
+        <div class="convo">
+          <div class="avwrap"><div class="avatar a-40" style="background:linear-gradient(160deg,#8E9AA8,#6B7C8C)">伟</div><span class="dot away"></span></div>
+          <div><div class="top"><span class="cname">张伟</span></div><div class="preview">开会中，稍后联系</div></div>
+          <div class="col-r"><span class="time">周二</span></div>
+        </div>
+
+        <div class="group-label">Offline · 2</div>
+        <div class="convo" style="opacity:.7">
+          <div class="avwrap"><div class="avatar a-40" style="background:linear-gradient(160deg,#B0BAC6,#8E9AA8)">静</div><span class="dot off"></span></div>
+          <div><div class="top"><span class="cname">陈静</span></div><div class="preview">周末的照片我发你啦</div></div>
+          <div class="col-r"><span class="time">7/12</span></div>
+        </div>
+        <div class="convo" style="opacity:.7">
+          <div class="avwrap"><div class="avatar a-40" style="background:linear-gradient(160deg,#B0BAC6,#8E9AA8)">K</div><span class="dot off"></span></div>
+          <div><div class="top"><span class="cname">Kevin</span></div><div class="preview">Let's sync tomorrow morning</div></div>
+          <div class="col-r"><span class="time">7/10</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- chat panel -->
+    <section class="chat">
+      <header class="chat-head">
+        <div class="avwrap"><div class="avatar a-38" style="background:linear-gradient(160deg,#FF9A6B,#FF6B4A)">林</div></div>
+        <div>
+          <div class="name">林晓</div>
+          <div class="status">● 在线</div>
+        </div>
+        <div class="spacer"></div>
+        <span class="tool" title="Voice call (coming later)" aria-label="Voice call">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6.5 4h3l1.5 4-2 1.5a11 11 0 0 0 5 5l1.5-2 4 1.5v3a2 2 0 0 1-2.2 2A16 16 0 0 1 4.5 6.2 2 2 0 0 1 6.5 4Z"/></svg>
+        </span>
+        <span class="tool" title="More" aria-label="More">
+          <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+        </span>
+      </header>
+
+      <div class="stream">
+        <div class="daydiv">今天 10:24</div>
+
+        <div class="row in">
+          <div class="avatar a-38" style="background:linear-gradient(160deg,#FF9A6B,#FF6B4A)">林</div>
+          <div>
+            <div class="bubble">在吗？周末的方案我改好了，想让你先过目一下 🙌</div>
+            <div class="meta-line">10:24</div>
+          </div>
+        </div>
+
+        <div class="row out">
+          <div>
+            <div class="bubble">刚看到，我瞧瞧</div>
+            <div class="meta-line">10:25 · <span class="tick">已读</span></div>
+          </div>
+        </div>
+
+        <div class="row in">
+          <div class="avatar a-38" style="background:linear-gradient(160deg,#FF9A6B,#FF6B4A)">林</div>
+          <div>
+            <div class="bubble">主要改了首页那块的配色，之前太灰了，这次换成企鹅那种天蓝</div>
+            <div class="meta-line">10:25</div>
+          </div>
+        </div>
+
+        <div class="row out">
+          <div>
+            <div class="bubble">这个蓝色好看！就用这个 👍</div>
+            <div class="meta-line">10:26 · <span class="tick">已读</span></div>
+          </div>
+        </div>
+
+        <div class="row in">
+          <div class="avatar a-38" style="background:linear-gradient(160deg,#FF9A6B,#FF6B4A)">林</div>
+          <div class="typing"><i></i><i></i><i></i></div>
+        </div>
+      </div>
+
+      <div class="composer">
+        <div class="comp-tools">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" title="Emoji"><circle cx="12" cy="12" r="9"/><path d="M8.5 14a4 4 0 0 0 7 0"/><circle cx="9" cy="9.5" r="1"/><circle cx="15" cy="9.5" r="1"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" title="Image"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="m4 18 5-5 4 4 3-3 4 4"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" title="File"><path d="M14 3v5h5"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/></svg>
+        </div>
+        <div class="comp-row">
+          <textarea placeholder="Write a message… (Enter to send)"></textarea>
+          <button class="send">Send</button>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
