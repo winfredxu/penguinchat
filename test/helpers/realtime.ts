@@ -37,6 +37,8 @@ export async function makeRealtimeStack(): Promise<RealtimeStack> {
     presence,
     pool,
   });
+  const { registerMessagingHandlers } = await import("../../src/modules/messaging/messaging.handlers.js");
+  registerMessagingHandlers(io, { pool, registry });
   registry.attach(io);
   return {
     app,
@@ -79,4 +81,15 @@ export async function registerUser(
   });
   const body = res.json();
   return { id: body.user.id, accessToken: body.tokens.accessToken, username };
+}
+
+/** Emit a socket event and resolve its ack. */
+export function emitAck(
+  sock: ClientSocket,
+  event: string,
+  payload: unknown
+): Promise<unknown> {
+  return new Promise((resolve) => {
+    sock.emit(event, payload, (ack: unknown) => resolve(ack));
+  });
 }
