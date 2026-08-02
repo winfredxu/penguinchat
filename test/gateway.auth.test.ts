@@ -1,5 +1,7 @@
 import { afterAll, expect, test } from "vitest";
+import jwt from "jsonwebtoken";
 import { makeRealtimeStack, socketClient, registerUser, type RealtimeStack } from "./helpers/realtime.js";
+import { testConfig } from "./helpers/app.js";
 
 let stack: RealtimeStack;
 afterAll(async () => { if (stack) await stack.cleanup(); });
@@ -35,4 +37,11 @@ test("missing token is rejected", async () => {
 
 test("invalid token is rejected", async () => {
   await expect(socketClient(stack.port, "not-a-jwt")).rejects.toThrow();
+});
+
+test("token without a sub claim is rejected (FU-13)", async () => {
+  // A validly-signed access token that lacks sub. Without the guard the socket
+  // would connect and join a room literally named "undefined".
+  const token = jwt.sign({}, testConfig.jwtAccessSecret, { expiresIn: "15m" });
+  await expect(socketClient(stack.port, token)).rejects.toThrow();
 });

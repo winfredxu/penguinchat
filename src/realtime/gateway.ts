@@ -28,6 +28,10 @@ export function createGateway(server: HttpServer, deps: GatewayDeps): Server {
     }
     try {
       const { sub } = verifyAccess(token, deps.config);
+      // Defense-in-depth (FU-13): a validly-signed access token should always
+      // carry sub, but if one ever lacks it, reject rather than letting the
+      // socket join a room literally named "undefined".
+      if (!sub) return next(new Error("unauthorized"));
       socket.data.userId = sub;
       next();
     } catch {
