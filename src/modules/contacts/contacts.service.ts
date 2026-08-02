@@ -5,7 +5,7 @@ import type { PresenceReader, PresenceStatus } from "../presence/presence.servic
 import { findById, findByUsername, type PublicUser } from "../auth/auth.repo.js";
 import {
   areFriends,
-  findPendingBetween,
+  findPendingEitherDirection,
   findRequestById,
   insertFriendship,
   insertRequest,
@@ -29,7 +29,9 @@ export async function sendRequest(
   if (target.id === fromUser) throw new AppError(400, "self_request", "Cannot add yourself");
   if (await areFriends(pool, fromUser, target.id))
     throw new AppError(409, "already_friends", "Already friends");
-  const dup = await findPendingBetween(pool, fromUser, target.id);
+  // Directional check would miss a reverse B->A pending request (FU-8); check
+  // both directions so a pending request between the pair blocks either side.
+  const dup = await findPendingEitherDirection(pool, fromUser, target.id);
   if (dup) throw new AppError(409, "request_exists", "Request already pending");
 
   const request = await insertRequest(pool, fromUser, target.id, message);
