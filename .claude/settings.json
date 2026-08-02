@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp /Users/winfredxu/penguinchat/.claude/plans/plan-2c-hardening.md /Users/winfredxu/penguinchat/docs/superpowers/plans/2026-08-02-plan2c-hardening.md && head -1 /Users/winfredxu/penguinchat/docs/superpowers/plans/2026-08-02-plan2c-hardening.md)",
+      "Bash(export npm_config_cache=/tmp/claude-501/-Users-winfredxu-penguinchat/deb5185c-85bd-4194-808f-98b389c6dd23/scratchpad/npm-cache)",
+      "Bash(npm test *)",
+      "Bash(node -e \"console.log\\('socket.io', require\\('./node_modules/socket.io/package.json'\\).version\\); console.log\\('socket.io-client', require\\('./node_modules/socket.io-client/package.json'\\).version\\); console.log\\('redis-adapter', require\\('./node_modules/@socket.io/redis-adapter/package.json'\\).version\\)\")",
+      "Bash(echo \"TSC_EXIT=$?\")"
+    ],
+    "additionalDirectories": [
+      "/Users/winfredxu/penguinchat/.claude/plans"
+    ]
+  }
+}
