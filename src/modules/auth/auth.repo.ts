@@ -72,3 +72,35 @@ export async function updateUser(
   );
   return res.rows[0];
 }
+
+// --- Refresh-token rotation (FU-1) ---
+
+export async function insertRefreshToken(
+  pool: Pool,
+  input: { jti: string; userId: string }
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO refresh_tokens (jti, user_id) VALUES ($1, $2)
+     ON CONFLICT (jti) DO NOTHING`,
+    [input.jti, input.userId]
+  );
+}
+
+export async function getRefreshToken(
+  pool: Pool,
+  jti: string
+): Promise<{ revoked: boolean } | null> {
+  const res = await pool.query<{ revoked: boolean }>(
+    "SELECT revoked FROM refresh_tokens WHERE jti = $1",
+    [jti]
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function revokeRefreshToken(pool: Pool, jti: string): Promise<void> {
+  await pool.query("UPDATE refresh_tokens SET revoked = true WHERE jti = $1", [jti]);
+}
+
+export async function revokeAllRefreshTokens(pool: Pool, userId: string): Promise<void> {
+  await pool.query("UPDATE refresh_tokens SET revoked = true WHERE user_id = $1", [userId]);
+}
