@@ -34,6 +34,20 @@ test("refresh extends the TTL (key still present after a refresh)", async () => 
   await ps.clear(id);
 });
 
+test("refresh self-heals a racing clear: SET EX recreates an absent key (FU-11)", async () => {
+  const ps = new PresenceService(clients.general, 30);
+  const id = "66666666-6666-6666-6666-666666666666";
+  await ps.setOnline(id);
+  // Simulate the disconnect/clear race: a new socket setOnline, then a racing
+  // clear() wipes the just-set key. The next heartbeat (~25s) calls refresh().
+  // With EXPIRE (old) that is a no-op on the absent key -> user stays offline
+  // until reconnect. With SET EX (FU-11) refresh recreates the key -> online.
+  await ps.clear(id);
+  await ps.refresh(id);
+  expect(await ps.get(id)).toBe("online");
+  await ps.clear(id);
+});
+
 test("NoopPresenceService returns offline for everyone", async () => {
   const noop = new NoopPresenceService();
   const map = await noop.getMany(["a", "b"]);

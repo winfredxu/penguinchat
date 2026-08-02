@@ -16,7 +16,13 @@ export class PresenceService implements PresenceReader {
   }
 
   async refresh(userId: string): Promise<void> {
-    await this.general.expire(key(userId), this.ttlSeconds);
+    // SET ... EX (not EXPIRE) so a refresh recreates the key if a racing
+    // disconnect.clear() deleted it. With EXPIRE, a clear that lands between a
+    // new connection's setOnline and the next heartbeat would leave presence
+    // stale (EXPIRE is a no-op on an absent key) until the user reconnects.
+    // Recreating here is safe: only a genuinely connected client emits
+    // heartbeats, so a ghost socket can't resurrect presence.
+    await this.general.set(key(userId), "online", { EX: this.ttlSeconds });
   }
 
   async clear(userId: string): Promise<void> {
