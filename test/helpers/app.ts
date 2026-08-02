@@ -14,6 +14,7 @@ export const testConfig: Config = {
   jwtRefreshSecret: "test-refresh",
   accessTtl: "15m",
   refreshTtl: "30d",
+  corsOrigins: [],
 };
 
 export function makePool(): Pool {

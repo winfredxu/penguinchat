@@ -4,6 +4,7 @@ import rateLimit from "@fastify/rate-limit";
 import type { Pool } from "pg";
 import type { Config } from "./config.js";
 import { AppError } from "./lib/errors.js";
+import { corsOriginOption } from "./lib/cors.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
 import { contactsRoutes } from "./modules/contacts/contacts.routes.js";
 import { messagingRoutes } from "./modules/messaging/messaging.routes.js";
@@ -23,7 +24,7 @@ export interface AppDeps {
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
 
-  await app.register(cors, { origin: true });
+  await app.register(cors, { origin: corsOriginOption(deps.config.corsOrigins) });
   await app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
 
   app.setErrorHandler((err, _req, reply) => {

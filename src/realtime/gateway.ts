@@ -6,6 +6,7 @@ import type { Pool } from "pg";
 import type { Config } from "../config.js";
 import type { RedisClientType } from "redis";
 import { verifyAccess } from "../modules/auth/tokens.js";
+import { corsOriginOption } from "../lib/cors.js";
 import type { PresenceService } from "../modules/presence/presence.service.js";
 import { registerPresenceHandlers } from "../modules/presence/presence.handlers.js";
 
@@ -18,7 +19,7 @@ export interface GatewayDeps {
 }
 
 export function createGateway(server: HttpServer, deps: GatewayDeps): Server {
-  const io = new IoServer(server, { cors: { origin: "*" } });
+  const io = new IoServer(server, { cors: { origin: corsOriginOption(deps.config.corsOrigins) } });
   io.adapter(createAdapter(deps.pub, deps.sub));
 
   io.use((socket, next) => {
