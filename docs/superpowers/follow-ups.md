@@ -4,6 +4,22 @@ Tracked items surfaced during the Plan 1 (backend foundation) reviews. None were
 merge-blocking; the deploy-blocking migration-on-boot item was fixed before merge
 (`fix: run migrations on server boot`). The rest are recorded here.
 
+## Resolved in Plan 2c (backend hardening)
+
+The following were closed by Plan 2c (`feat/plan2c-hardening`):
+
+- **FU-1** - Refresh-token rotation: `refresh_tokens` table (jti) + reuse detection that revokes all the user's tokens.
+- **FU-3** - REST CORS is now an env-driven allowlist (`CORS_ORIGINS`).
+- **FU-7** - JWTs carry a `type` claim; `verifyAccess`/`verifyRefresh` enforce it.
+- **FU-8** - Friend-request dup check covers both directions.
+- **FU-11** - Presence `refresh()` uses `SET ... EX`, self-healing a racing `clear()`.
+- **FU-12** - Multi-instance fan-out is now tested (two io stacks via the redis adapter).
+- **FU-13** - Gateway rejects an access token lacking `sub`.
+- **FU-14** - `closeRedisClients` uses `Promise.allSettled`.
+- **FU-15** - Socket.IO CORS is now the same env-driven allowlist as REST.
+
+Still open (Minor, not in 2c scope): FU-4, FU-5, FU-6, FU-9, FU-10, FU-16.
+
 ## From the final whole-branch review
 
 ### FU-1 — Refresh-token rotation is cosmetic (Important)
