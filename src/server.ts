@@ -6,6 +6,7 @@ import { createRedisClients, closeRedisClients } from "./realtime/redis.js";
 import { PresenceService } from "./modules/presence/presence.service.js";
 import { RedisSessionRegistry } from "./modules/session-registry/redis-session-registry.js";
 import { createGateway } from "./realtime/gateway.js";
+import { registerMessagingHandlers } from "./modules/messaging/messaging.handlers.js";
 
 async function main() {
   const config = loadConfig();
@@ -26,6 +27,7 @@ async function main() {
     presence,
     pool,
   });
+  registerMessagingHandlers(io, { pool, registry });
   registry.attach(io);
 
   // eslint-disable-next-line no-console
