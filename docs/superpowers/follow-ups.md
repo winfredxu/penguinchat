@@ -18,7 +18,17 @@ The following were closed by Plan 2c (`feat/plan2c-hardening`):
 - **FU-14** - `closeRedisClients` uses `Promise.allSettled`.
 - **FU-15** - Socket.IO CORS is now the same env-driven allowlist as REST.
 
-Still open (Minor, not in 2c scope): FU-4, FU-5, FU-6, FU-9, FU-10, FU-16.
+## Resolved in Plan 2d (minor follow-up cleanups)
+
+The following were closed by Plan 2d (`feat/plan2d-minor-fus`):
+
+- **FU-4** - Removed the unused `db/pool.ts` query wrapper.
+- **FU-5** - Removed the unused `findById` re-export from the contacts service.
+- **FU-6** - Enabled env-configurable structured request logging (`LOG_LEVEL`).
+- **FU-9** - Invalid friend-request UUID route parameters now return `400 invalid_payload`.
+
+Still open: FU-10 (accepted low-risk TOCTOU) and FU-16 (no current need for a
+handler dependency interface).
 
 ## From the final whole-branch review
 

@@ -8,6 +8,7 @@ const TEST_DB_URL =
 
 export const testConfig: Config = {
   port: 0,
+  logLevel: "silent",
   databaseUrl: TEST_DB_URL,
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
   jwtAccessSecret: "test-access",

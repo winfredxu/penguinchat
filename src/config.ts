@@ -1,5 +1,6 @@
 export interface Config {
   port: number;
+  logLevel: string;
   databaseUrl: string;
   redisUrl: string;
   jwtAccessSecret: string;
@@ -20,6 +21,7 @@ export function loadConfig(): Config {
   const corsOriginsEnv = process.env.CORS_ORIGINS;
   return {
     port: Number(process.env.PORT ?? 3000),
+    logLevel: process.env.LOG_LEVEL ?? "info",
     databaseUrl: required("DATABASE_URL"),
     redisUrl: required("REDIS_URL"),
     jwtAccessSecret: required("JWT_ACCESS_SECRET"),

@@ -19,10 +19,16 @@ export interface AppDeps {
   config: Config;
   registry?: SessionRegistry;
   presence?: PresenceReader;
+  logStream?: { write(message: string): void };
 }
 
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+  const app = Fastify({
+    logger: {
+      level: deps.config.logLevel,
+      ...(deps.logStream ? { stream: deps.logStream } : {}),
+    },
+  });
 
   await app.register(cors, { origin: corsOriginOption(deps.config.corsOrigins) });
   await app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
