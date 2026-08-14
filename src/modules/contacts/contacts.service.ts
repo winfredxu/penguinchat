@@ -2,7 +2,7 @@ import type { Pool } from "pg";
 import { AppError } from "../../lib/errors.js";
 import type { SessionRegistry } from "../session-registry/session-registry.js";
 import type { PresenceReader, PresenceStatus } from "../presence/presence.service.js";
-import { findById, findByUsername, type PublicUser } from "../auth/auth.repo.js";
+import { findByUsername, type PublicUser } from "../auth/auth.repo.js";
 import {
   areFriends,
   findPendingEitherDirection,
@@ -82,6 +82,3 @@ export async function listContacts(
     presence: statusMap.get(f.id) ?? ("offline" as PresenceStatus),
   }));
 }
-
-// Re-export so routes need only import this module.
-export { findById };
