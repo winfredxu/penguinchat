@@ -80,6 +80,28 @@ test("duplicate pending request is rejected", async () => {
   expect(res.statusCode).toBe(409);
 });
 
+test("reverse-direction pending request is rejected (FU-8)", async () => {
+  const a = await register("alice");
+  const b = await register("bob");
+  // Bob requests Alice (B -> A pending).
+  await app.inject({
+    method: "POST",
+    url: "/friend-requests",
+    headers: auth(b.token),
+    payload: { username: "alice" },
+  });
+  // Alice requesting Bob (A -> B) must be rejected too: there is already a
+  // pending request between them, just in the other direction. The old
+  // directional check let this through and created a duplicate.
+  const res = await app.inject({
+    method: "POST",
+    url: "/friend-requests",
+    headers: auth(a.token),
+    payload: { username: "bob" },
+  });
+  expect(res.statusCode).toBe(409);
+});
+
 test("cannot accept someone else's request", async () => {
   const a = await register("alice");
   await register("bob");
@@ -98,6 +120,21 @@ test("cannot accept someone else's request", async () => {
   });
   expect(res.statusCode).toBe(403);
 });
+
+test.each(["accept", "decline"])(
+  "invalid friend-request id returns 400 for %s",
+  async (action) => {
+    const user = await register("alice");
+    const res = await app.inject({
+      method: "POST",
+      url: `/friend-requests/not-a-uuid/${action}`,
+      headers: auth(user.token),
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: "invalid_payload" });
+  }
+);
 
 test("decline removes the request from incoming", async () => {
   const a = await register("alice");
