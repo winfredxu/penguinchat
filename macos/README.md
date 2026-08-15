@@ -14,9 +14,11 @@ use a `WKWebView` or embed the React client.
   domain code must not import the package directly.
 
 The package separates `PenguinChatCore` (configuration, models, HTTP transport,
-and service protocols) from the `PenguinChatMac` SwiftUI executable. This keeps
-network behavior testable without launching the app and leaves room for
-Keychain/session and realtime implementations.
+services, Keychain token storage, and session lifecycle) from the
+`PenguinChatMac` SwiftUI executable. This keeps authentication and network
+behavior testable without launching the app. Sensitive access and refresh
+tokens are stored only as a generic-password Keychain item; they are never
+written to `UserDefaults` or logs.
 
 ## Build, test, and run
 
@@ -30,8 +32,10 @@ swift run PenguinChatMac
 ```
 
 You can also open `macos/PenguinChatMac/Package.swift` in Xcode, select the
-`PenguinChatMac` scheme, and Run. The app presents a native login placeholder;
-“预览会话” switches to the native three-column session shell.
+`PenguinChatMac` scheme, and Run. The app provides native login and registration,
+restores a Keychain-backed session on launch, rotates an expired access/refresh
+pair once, and removes the local credentials on logout. The current server has
+no revoke endpoint, so logout is intentionally local-only.
 
 Debug uses `http://127.0.0.1:3000` for both REST and Socket.IO. Override it in
 the Xcode scheme or shell:
