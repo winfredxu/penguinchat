@@ -15,5 +15,7 @@ export async function createRedisClients(redisUrl: string): Promise<RedisClients
 }
 
 export async function closeRedisClients(c: RedisClients): Promise<void> {
-  await Promise.all([c.pub.quit(), c.sub.quit(), c.general.quit()]);
+  // allSettled (FU-14): if one client is already in an error state, Promise.all
+  // would reject on it and leave the other quits un-awaited, leaking connections.
+  await Promise.allSettled([c.pub.quit(), c.sub.quit(), c.general.quit()]);
 }

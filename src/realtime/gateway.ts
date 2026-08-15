@@ -6,6 +6,7 @@ import type { Pool } from "pg";
 import type { Config } from "../config.js";
 import type { RedisClientType } from "redis";
 import { verifyAccess } from "../modules/auth/tokens.js";
+import { corsOriginOption } from "../lib/cors.js";
 import type { PresenceService } from "../modules/presence/presence.service.js";
 import { registerPresenceHandlers } from "../modules/presence/presence.handlers.js";
 
@@ -18,7 +19,7 @@ export interface GatewayDeps {
 }
 
 export function createGateway(server: HttpServer, deps: GatewayDeps): Server {
-  const io = new IoServer(server, { cors: { origin: "*" } });
+  const io = new IoServer(server, { cors: { origin: corsOriginOption(deps.config.corsOrigins) } });
   io.adapter(createAdapter(deps.pub, deps.sub));
 
   io.use((socket, next) => {
@@ -28,6 +29,10 @@ export function createGateway(server: HttpServer, deps: GatewayDeps): Server {
     }
     try {
       const { sub } = verifyAccess(token, deps.config);
+      // Defense-in-depth (FU-13): a validly-signed access token should always
+      // carry sub, but if one ever lacks it, reject rather than letting the
+      // socket join a room literally named "undefined".
+      if (!sub) return next(new Error("unauthorized"));
       socket.data.userId = sub;
       next();
     } catch {

@@ -4,6 +4,32 @@ Tracked items surfaced during the Plan 1 (backend foundation) reviews. None were
 merge-blocking; the deploy-blocking migration-on-boot item was fixed before merge
 (`fix: run migrations on server boot`). The rest are recorded here.
 
+## Resolved in Plan 2c (backend hardening)
+
+The following were closed by Plan 2c (`feat/plan2c-hardening`):
+
+- **FU-1** - Refresh-token rotation: `refresh_tokens` table (jti) + reuse detection that revokes all the user's tokens.
+- **FU-3** - REST CORS is now an env-driven allowlist (`CORS_ORIGINS`).
+- **FU-7** - JWTs carry a `type` claim; `verifyAccess`/`verifyRefresh` enforce it.
+- **FU-8** - Friend-request dup check covers both directions.
+- **FU-11** - Presence `refresh()` uses `SET ... EX`, self-healing a racing `clear()`.
+- **FU-12** - Multi-instance fan-out is now tested (two io stacks via the redis adapter).
+- **FU-13** - Gateway rejects an access token lacking `sub`.
+- **FU-14** - `closeRedisClients` uses `Promise.allSettled`.
+- **FU-15** - Socket.IO CORS is now the same env-driven allowlist as REST.
+
+## Resolved in Plan 2d (minor follow-up cleanups)
+
+The following were closed by Plan 2d (`feat/plan2d-minor-fus`):
+
+- **FU-4** - Removed the unused `db/pool.ts` query wrapper.
+- **FU-5** - Removed the unused `findById` re-export from the contacts service.
+- **FU-6** - Enabled env-configurable structured request logging (`LOG_LEVEL`).
+- **FU-9** - Invalid friend-request UUID route parameters now return `400 invalid_payload`.
+
+Still open: FU-10 (accepted low-risk TOCTOU) and FU-16 (no current need for a
+handler dependency interface).
+
 ## From the final whole-branch review
 
 ### FU-1 — Refresh-token rotation is cosmetic (Important)

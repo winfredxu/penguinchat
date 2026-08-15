@@ -8,12 +8,14 @@ const TEST_DB_URL =
 
 export const testConfig: Config = {
   port: 0,
+  logLevel: "silent",
   databaseUrl: TEST_DB_URL,
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
   jwtAccessSecret: "test-access",
   jwtRefreshSecret: "test-refresh",
   accessTtl: "15m",
   refreshTtl: "30d",
+  corsOrigins: [],
 };
 
 export function makePool(): Pool {
