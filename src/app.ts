@@ -38,6 +38,16 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       reply.code(err.status).send({ error: err.code, message: err.message });
       return;
     }
+    const statusCode = typeof err === "object" && err !== null && "statusCode" in err
+      ? (err as { statusCode?: unknown }).statusCode
+      : undefined;
+    if (typeof statusCode === "number" && statusCode >= 400 && statusCode < 500) {
+      reply.code(statusCode).send({
+        error: "invalid_request",
+        message: err instanceof Error ? err.message : "Invalid request",
+      });
+      return;
+    }
     reply.code(500).send({ error: "internal", message: "Internal server error" });
   });
 

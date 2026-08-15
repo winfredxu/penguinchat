@@ -45,6 +45,7 @@ test("full friend flow: request -> incoming -> accept -> contacts", async () => 
     headers: auth(b.token),
   });
   expect(incoming.json()).toHaveLength(1);
+  expect(incoming.json()[0]).toMatchObject({ from_username: "alice", from_display_name: "alice" });
 
   const accept = await app.inject({
     method: "POST",

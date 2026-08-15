@@ -10,6 +10,11 @@ export interface FriendRequestRow {
   created_at: string;
 }
 
+export interface IncomingFriendRequest extends FriendRequestRow {
+  from_username: string;
+  from_display_name: string;
+}
+
 export async function insertRequest(
   pool: Pool,
   fromUser: string,
@@ -46,10 +51,12 @@ export async function findPendingEitherDirection(
   return res.rows[0] ?? null;
 }
 
-export async function listIncomingPending(pool: Pool, userId: string): Promise<FriendRequestRow[]> {
-  const res = await pool.query<FriendRequestRow>(
-    `SELECT * FROM friend_requests
-     WHERE to_user = $1 AND status = 'pending' ORDER BY created_at DESC`,
+export async function listIncomingPending(pool: Pool, userId: string): Promise<IncomingFriendRequest[]> {
+  const res = await pool.query<IncomingFriendRequest>(
+    `SELECT fr.*, u.username AS from_username, u.display_name AS from_display_name
+     FROM friend_requests fr
+     JOIN users u ON u.id = fr.from_user
+     WHERE fr.to_user = $1 AND fr.status = 'pending' ORDER BY fr.created_at DESC`,
     [userId]
   );
   return res.rows;
