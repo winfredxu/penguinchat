@@ -4,3 +4,6 @@ dist
 .worktrees
 .superpowers
 .env
+.build
+.swiftpm
+DerivedData

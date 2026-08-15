@@ -51,3 +51,19 @@ With the full Docker stack running, execute the repeatable dual-user smoke test:
 ```bash
 cd client && node e2e.local.mjs
 ```
+
+## Native macOS client
+
+The native SwiftUI client bootstrap lives in `macos/PenguinChatMac`. It is a
+macOS 14+ Swift Package and does not embed the web client.
+
+```bash
+cd macos/PenguinChatMac
+swift test
+swift run PenguinChatMac
+```
+
+The Debug app connects to `http://127.0.0.1:3000` by default. Set
+`PENGUINCHAT_API_URL` in the scheme or shell to use another API origin. See
+`macos/README.md` for Xcode instructions and `docs/macos-api-contract.md` for
+the audited REST and Socket.IO contract.
