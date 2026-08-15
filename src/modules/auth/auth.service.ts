@@ -6,7 +6,11 @@ import { issueTokens, verifyRefresh } from "./tokens.js";
 import {
   findById,
   findByUsername,
+  insertRefreshToken,
   insertUser,
+  getRefreshToken,
+  revokeAllRefreshTokens,
+  revokeRefreshToken,
   toPublic,
   updateUser,
   type PublicUser,
@@ -30,7 +34,9 @@ export async function register(
     display_name: input.display_name,
     password_hash,
   });
-  return { user: toPublic(user), tokens: issueTokens(user.id, cfg) };
+  const tokens = issueTokens(user.id, cfg);
+  await insertRefreshToken(pool, { jti: tokens.jti, userId: user.id });
+  return { user: toPublic(user), tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken } };
 }
 
 export async function login(
@@ -42,7 +48,9 @@ export async function login(
   if (!user) throw new AppError(401, "invalid_credentials", "Invalid username or password");
   const ok = await verifyPassword(user.password_hash, input.password);
   if (!ok) throw new AppError(401, "invalid_credentials", "Invalid username or password");
-  return { user: toPublic(user), tokens: issueTokens(user.id, cfg) };
+  const tokens = issueTokens(user.id, cfg);
+  await insertRefreshToken(pool, { jti: tokens.jti, userId: user.id });
+  return { user: toPublic(user), tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken } };
 }
 
 export async function refresh(
@@ -51,15 +59,27 @@ export async function refresh(
   refreshToken: string
 ): Promise<{ tokens: { accessToken: string; refreshToken: string } }> {
   let sub: string;
+  let jti: string;
   try {
-    sub = verifyRefresh(refreshToken, cfg).sub;
+    ({ sub, jti } = verifyRefresh(refreshToken, cfg));
   } catch {
     throw new AppError(401, "invalid_token", "Invalid refresh token");
   }
   const user = await findById(pool, sub);
   if (!user) throw new AppError(401, "invalid_token", "Invalid refresh token");
-  // Rotation: issue a brand-new pair every refresh.
-  return { tokens: issueTokens(user.id, cfg) };
+  const stored = await getRefreshToken(pool, jti);
+  if (!stored) throw new AppError(401, "invalid_token", "Invalid refresh token");
+  if (stored.revoked) {
+    // Reuse detected: a rotated-out (revoked) token was presented again. Assume
+    // compromise and revoke every device's refresh token for this user (FU-1).
+    await revokeAllRefreshTokens(pool, sub);
+    throw new AppError(401, "invalid_token", "Invalid refresh token");
+  }
+  // Rotate: revoke the presented token, issue a fresh pair with a new jti.
+  await revokeRefreshToken(pool, jti);
+  const tokens = issueTokens(user.id, cfg);
+  await insertRefreshToken(pool, { jti: tokens.jti, userId: user.id });
+  return { tokens: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken } };
 }
 
 export async function getMe(pool: Pool, userId: string): Promise<PublicUser> {

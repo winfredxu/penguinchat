@@ -2,10 +2,10 @@ import type { Pool } from "pg";
 import { AppError } from "../../lib/errors.js";
 import type { SessionRegistry } from "../session-registry/session-registry.js";
 import type { PresenceReader, PresenceStatus } from "../presence/presence.service.js";
-import { findById, findByUsername, type PublicUser } from "../auth/auth.repo.js";
+import { findByUsername, type PublicUser } from "../auth/auth.repo.js";
 import {
   areFriends,
-  findPendingBetween,
+  findPendingEitherDirection,
   findRequestById,
   insertFriendship,
   insertRequest,
@@ -29,7 +29,9 @@ export async function sendRequest(
   if (target.id === fromUser) throw new AppError(400, "self_request", "Cannot add yourself");
   if (await areFriends(pool, fromUser, target.id))
     throw new AppError(409, "already_friends", "Already friends");
-  const dup = await findPendingBetween(pool, fromUser, target.id);
+  // Directional check would miss a reverse B->A pending request (FU-8); check
+  // both directions so a pending request between the pair blocks either side.
+  const dup = await findPendingEitherDirection(pool, fromUser, target.id);
   if (dup) throw new AppError(409, "request_exists", "Request already pending");
 
   const request = await insertRequest(pool, fromUser, target.id, message);
@@ -80,6 +82,3 @@ export async function listContacts(
     presence: statusMap.get(f.id) ?? ("offline" as PresenceStatus),
   }));
 }
-
-// Re-export so routes need only import this module.
-export { findById };

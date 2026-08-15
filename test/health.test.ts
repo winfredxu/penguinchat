@@ -18,3 +18,14 @@ test("GET /health returns ok", async () => {
   expect(res.statusCode).toBe(200);
   expect(res.json()).toEqual({ status: "ok" });
 });
+
+test("malformed JSON is reported as a client error", async () => {
+  const res = await app.inject({
+    method: "POST",
+    url: "/auth/login",
+    headers: { "content-type": "application/json" },
+    payload: "",
+  });
+  expect(res.statusCode).toBe(400);
+  expect(res.json()).toMatchObject({ error: "invalid_request" });
+});

@@ -40,8 +40,24 @@ services:
       JWT_REFRESH_SECRET: dev-refresh-secret-change-me
       ACCESS_TTL: 15m
       REFRESH_TTL: 30d
+      CORS_ORIGINS: http://localhost:5173
     ports:
-      - "3000:3000"
+      - "${PENGUINCHAT_API_PORT:-3100}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  app:
+    build:
+      context: ./client
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${PENGUINCHAT_APP_PORT:-5173}:80"
+    restart: unless-stopped
 
 volumes:
   pgdata:

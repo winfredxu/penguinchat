@@ -3,7 +3,7 @@ import type { Pool } from "pg";
 import { AppError } from "../../lib/errors.js";
 import type { SessionRegistry } from "../session-registry/session-registry.js";
 import type { PresenceReader } from "../presence/presence.service.js";
-import { sendRequestSchema } from "./contacts.schema.js";
+import { requestIdParamsSchema, sendRequestSchema } from "./contacts.schema.js";
 import {
   acceptRequest,
   declineRequest,
@@ -44,13 +44,15 @@ export async function contactsRoutes(app: FastifyInstance, opts: Opts) {
   });
 
   app.post("/friend-requests/:id/accept", { preHandler: app.requireAuth }, async (req) => {
-    const { id } = req.params as { id: string };
-    return acceptRequest(pool, registry, req.userId!, id);
+    const parsed = requestIdParamsSchema.safeParse(req.params);
+    if (!parsed.success) throw new AppError(400, "invalid_payload", parsed.error.message);
+    return acceptRequest(pool, registry, req.userId!, parsed.data.id);
   });
 
   app.post("/friend-requests/:id/decline", { preHandler: app.requireAuth }, async (req) => {
-    const { id } = req.params as { id: string };
-    await declineRequest(pool, req.userId!, id);
+    const parsed = requestIdParamsSchema.safeParse(req.params);
+    if (!parsed.success) throw new AppError(400, "invalid_payload", parsed.error.message);
+    await declineRequest(pool, req.userId!, parsed.data.id);
     return { ok: true };
   });
 }
