@@ -69,6 +69,26 @@ public struct ChatMessage: Codable, Equatable, Sendable, Identifiable {
     public let deliveredAt: String?
     public let readAt: String?
 
+    public init(
+        id: String,
+        conversation: String,
+        senderID: String,
+        recipientID: String,
+        body: String,
+        createdAt: String,
+        deliveredAt: String? = nil,
+        readAt: String? = nil
+    ) {
+        self.id = id
+        self.conversation = conversation
+        self.senderID = senderID
+        self.recipientID = recipientID
+        self.body = body
+        self.createdAt = createdAt
+        self.deliveredAt = deliveredAt
+        self.readAt = readAt
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, conversation, body
         case senderID = "sender_id"
