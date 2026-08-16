@@ -366,3 +366,63 @@ private func eventually(_ predicate: @escaping @Sendable () async -> Bool) async
 
     await store.stop()
 }
+
+/// The server derives conversation IDs as a UUID v5 hash, but an optimistically
+/// sent message carries a local placeholder and the send acknowledgement does
+/// not return the server's value. A read receipt must still land on it.
+@Test func readReceiptMarksOptimisticallySentMessageDespiteConversationIDMismatch() async throws {
+    let transport = FakeRealtimeTransport()
+    let store = makeStore(
+        transport: transport,
+        credentials: FakeRealtimeCredentials(accessToken: "token"),
+        history: FakeMessageHistoryService()
+    )
+    try await store.start()
+    await transport.enqueue(SendAcknowledgement(
+        id: "server-1",
+        createdAt: "2024-01-01T00:00:00Z",
+        clientMessageID: "local-1",
+        error: nil
+    ))
+    _ = await store.send(body: "hello", to: "bob", clientMessageID: "local-1")
+
+    // The local placeholder never equals the server's hashed conversation id.
+    let stored = await store.snapshot().messages[0]
+    #expect(stored.conversationID != "server-derived-uuid-v5")
+    #expect(stored.readAt == nil)
+
+    await transport.emit(.read(ReadEvent(
+        conversationID: "server-derived-uuid-v5",
+        upToMessageID: "server-1"
+    )))
+    try await eventually { await store.snapshot().messages[0].readAt != nil }
+    await store.stop()
+}
+
+/// A read receipt whose boundary message we did not send must not mark our own
+/// outbound messages read.
+@Test func readReceiptForIncomingBoundaryDoesNotMarkOutboundMessages() async throws {
+    let transport = FakeRealtimeTransport()
+    let store = makeStore(
+        transport: transport,
+        credentials: FakeRealtimeCredentials(accessToken: "token"),
+        history: FakeMessageHistoryService()
+    )
+    try await store.start()
+    await transport.enqueue(SendAcknowledgement(
+        id: "mine-1",
+        createdAt: "2024-01-01T00:00:00Z",
+        clientMessageID: "local-1",
+        error: nil
+    ))
+    _ = await store.send(body: "mine", to: "bob", clientMessageID: "local-1")
+    await store.mergeHistory([
+        message(id: "theirs-1", sender: "bob", recipient: "alice", body: "theirs", createdAt: "2024-01-01T00:00:05Z"),
+    ], peerID: "bob")
+
+    await transport.emit(.read(ReadEvent(conversationID: "any", upToMessageID: "theirs-1")))
+    try await eventually { await store.snapshot().messages.count == 2 }
+    let mine = await store.snapshot().messages.first { $0.serverID == "mine-1" }
+    #expect(mine?.readAt == nil)
+    await store.stop()
+}

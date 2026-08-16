@@ -445,12 +445,21 @@ public actor RealtimeChatStore {
         messages.remove(at: duplicate)
     }
 
+    /// The peer's read receipt is scoped by participant pair, not by
+    /// `event.conversationID`: the server derives conversation IDs as a UUID v5
+    /// hash, while an optimistically-sent message still carries the local
+    /// placeholder from `localConversationID(with:)` and the send
+    /// acknowledgement does not return the server's value. Matching on the
+    /// boundary message's sender/recipient pair is unambiguous for a
+    /// one-to-one conversation and works before any refetch corrects the id.
     private func markMessagesRead(_ event: ReadEvent) {
-        guard let boundary = messages.first(where: { $0.serverID == event.upToMessageID }) else { return }
+        guard let boundary = messages.first(where: { $0.serverID == event.upToMessageID }),
+              boundary.senderID == currentUserID else { return }
+        let peerID = boundary.recipientID
         let readAt = ISO8601DateFormatter().string(from: Date())
         for index in messages.indices where
-            messages[index].conversationID == event.conversationID &&
             messages[index].senderID == currentUserID &&
+            messages[index].recipientID == peerID &&
             sortKey(messages[index]) <= sortKey(boundary) {
             messages[index].readAt = messages[index].readAt ?? readAt
         }
