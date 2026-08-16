@@ -15,6 +15,22 @@ public struct PresenceUpdate: Codable, Equatable, Sendable {
     }
 }
 
+public struct FriendRequestEvent: Codable, Equatable, Sendable {
+    public let request: FriendRequest
+
+    public init(request: FriendRequest) { self.request = request }
+}
+
+public struct FriendAcceptedEvent: Codable, Equatable, Sendable {
+    public let friendID: String
+
+    public init(friendID: String) { self.friendID = friendID }
+
+    enum CodingKeys: String, CodingKey {
+        case friendID = "friendId"
+    }
+}
+
 public struct NewMessageEvent: Codable, Equatable, Sendable {
     public let message: ChatMessage
 
@@ -116,6 +132,8 @@ public enum RealtimeConnectionState: Equatable, Sendable {
 public enum RealtimeEvent: Equatable, Sendable {
     case connection(RealtimeConnectionState)
     case presence(PresenceUpdate)
+    case friendRequest(FriendRequestEvent)
+    case friendAccepted(FriendAcceptedEvent)
     case message(NewMessageEvent)
     case delivery(DeliveryEvent)
     case read(ReadEvent)

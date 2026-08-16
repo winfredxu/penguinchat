@@ -49,17 +49,26 @@ public struct RealtimeChatSnapshot: Equatable, Sendable {
     public let messages: [ReconciledMessage]
     public let presenceByUserID: [String: Presence]
     public let typingUserIDs: Set<String>
+    public let contacts: [Contact]
+    public let incomingRequests: [FriendRequest]
+    public let socialRefreshRevision: Int
 
     public init(
         connection: RealtimeConnectionState,
         messages: [ReconciledMessage],
         presenceByUserID: [String: Presence],
-        typingUserIDs: Set<String>
+        typingUserIDs: Set<String>,
+        contacts: [Contact] = [],
+        incomingRequests: [FriendRequest] = [],
+        socialRefreshRevision: Int = 0
     ) {
         self.connection = connection
         self.messages = messages
         self.presenceByUserID = presenceByUserID
         self.typingUserIDs = typingUserIDs
+        self.contacts = contacts
+        self.incomingRequests = incomingRequests
+        self.socialRefreshRevision = socialRefreshRevision
     }
 }
 
@@ -72,12 +81,16 @@ public actor RealtimeChatStore {
     private var connection: RealtimeConnectionState = .disconnected(reason: nil)
     private var messages: [ReconciledMessage] = []
     private var presenceByUserID: [String: Presence] = [:]
+    private var contactsByID: [String: Contact] = [:]
+    private var incomingRequestsByID: [String: FriendRequest] = [:]
+    private var socialRefreshRevision = 0
     private var typingUserIDs: Set<String> = []
     private var observedPeerIDs: Set<String> = []
     private var bufferedEvents: [RealtimeEvent] = []
     private var isReconciling = false
     private var eventTask: Task<Void, Never>?
     private var reconciliationTask: Task<Void, Never>?
+    private var snapshotContinuations: [UUID: AsyncStream<RealtimeChatSnapshot>.Continuation] = [:]
 
     public init(
         transport: any RealtimeTransport,
@@ -127,14 +140,50 @@ public actor RealtimeChatStore {
             connection: connection,
             messages: sortedMessages(),
             presenceByUserID: presenceByUserID,
-            typingUserIDs: typingUserIDs
+            typingUserIDs: typingUserIDs,
+            contacts: sortedContacts(),
+            incomingRequests: sortedIncomingRequests(),
+            socialRefreshRevision: socialRefreshRevision
         )
+    }
+
+    public func snapshots() -> AsyncStream<RealtimeChatSnapshot> {
+        let id = UUID()
+        let (stream, continuation) = AsyncStream.makeStream(of: RealtimeChatSnapshot.self)
+        snapshotContinuations[id] = continuation
+        continuation.yield(snapshot())
+        continuation.onTermination = { [weak self] _ in
+            Task { await self?.removeSnapshotContinuation(id) }
+        }
+        return stream
+    }
+
+    public func replaceSocialSnapshot(
+        contacts: [Contact],
+        incomingRequests: [FriendRequest],
+        replacePresence: Bool = false
+    ) {
+        contactsByID = Dictionary(contacts.map { ($0.id, $0) }, uniquingKeysWith: { _, newest in newest })
+        incomingRequestsByID = Dictionary(
+            incomingRequests.filter { $0.status == "pending" }.map { ($0.id, $0) },
+            uniquingKeysWith: { _, newest in newest }
+        )
+        for contact in contacts where replacePresence || presenceByUserID[contact.id] == nil {
+            presenceByUserID[contact.id] = contact.presence
+        }
+        publishSnapshot()
+    }
+
+    public func removeIncomingRequest(id: String) {
+        incomingRequestsByID[id] = nil
+        publishSnapshot()
     }
 
     public func mergeHistory(_ history: [ChatMessage], peerID: String) {
         observedPeerIDs.insert(peerID)
         for message in history { mergeServerMessage(message) }
         sortInPlace()
+        publishSnapshot()
     }
 
     @discardableResult
@@ -205,6 +254,7 @@ public actor RealtimeChatStore {
             connection = state
             switch state {
             case let .connected(isReconnect) where isReconnect:
+                socialRefreshRevision += 1
                 beginReconnectReconciliation()
             case .authenticationFailed:
                 await reauthenticate()
@@ -213,6 +263,11 @@ public actor RealtimeChatStore {
             }
         case let .presence(update):
             presenceByUserID[update.userID] = update.status
+        case let .friendRequest(event):
+            incomingRequestsByID[event.request.id] = event.request
+            socialRefreshRevision += 1
+        case .friendAccepted:
+            socialRefreshRevision += 1
         case let .message(event):
             mergeServerMessage(event.message)
             sortInPlace()
@@ -226,6 +281,7 @@ public actor RealtimeChatStore {
             if event.isTyping { typingUserIDs.insert(event.fromUserID) }
             else { typingUserIDs.remove(event.fromUserID) }
         }
+        publishSnapshot()
     }
 
     private func beginReconnectReconciliation() {
@@ -263,6 +319,7 @@ public actor RealtimeChatStore {
         bufferedEvents.removeAll()
         for event in buffered { applyBuffered(event) }
         sortInPlace()
+        publishSnapshot()
     }
 
     private func reauthenticate() async {
@@ -278,6 +335,11 @@ public actor RealtimeChatStore {
     private func applyBuffered(_ event: RealtimeEvent) {
         switch event {
         case let .presence(update): presenceByUserID[update.userID] = update.status
+        case let .friendRequest(event):
+            incomingRequestsByID[event.request.id] = event.request
+            socialRefreshRevision += 1
+        case .friendAccepted:
+            socialRefreshRevision += 1
         case let .message(event): mergeServerMessage(event.message)
         case let .delivery(event):
             if let index = messages.firstIndex(where: { $0.serverID == event.messageID }) {
@@ -375,5 +437,29 @@ public actor RealtimeChatStore {
 
     private func sortKey(_ message: ReconciledMessage) -> String {
         "\(message.createdAt)|\(message.serverID ?? message.clientMessageID ?? "")"
+    }
+
+    private func sortedContacts() -> [Contact] {
+        contactsByID.values
+            .map { $0.withPresence(presenceByUserID[$0.id] ?? $0.presence) }
+            .sorted {
+                let comparison = $0.displayName.localizedCaseInsensitiveCompare($1.displayName)
+                return comparison == .orderedSame ? $0.id < $1.id : comparison == .orderedAscending
+            }
+    }
+
+    private func sortedIncomingRequests() -> [FriendRequest] {
+        incomingRequestsByID.values.sorted {
+            $0.createdAt == $1.createdAt ? $0.id < $1.id : $0.createdAt > $1.createdAt
+        }
+    }
+
+    private func publishSnapshot() {
+        let value = snapshot()
+        for continuation in snapshotContinuations.values { continuation.yield(value) }
+    }
+
+    private func removeSnapshotContinuation(_ id: UUID) {
+        snapshotContinuations[id] = nil
     }
 }

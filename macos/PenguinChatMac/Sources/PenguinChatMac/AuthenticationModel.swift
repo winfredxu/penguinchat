@@ -13,7 +13,7 @@ final class AuthenticationModel: ObservableObject {
     @Published private(set) var isSubmitting = false
     @Published var errorMessage: String?
 
-    private let sessions: SessionManager
+    let sessions: SessionManager
     private var didRestore = false
 
     init(environment: AppEnvironment) {
