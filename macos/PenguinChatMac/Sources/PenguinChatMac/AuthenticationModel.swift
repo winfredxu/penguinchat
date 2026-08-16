@@ -13,6 +13,11 @@ final class AuthenticationModel: ObservableObject {
     @Published private(set) var isSubmitting = false
     @Published var errorMessage: String?
 
+    var isSignedIn: Bool {
+        if case .signedIn = phase { return true }
+        return false
+    }
+
     let sessions: SessionManager
     private var didRestore = false
 

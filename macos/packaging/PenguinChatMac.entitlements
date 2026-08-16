@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Outbound only: REST + Socket.IO to the PenguinChat server. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- Keychain access group for the saved session. Sandboxed builds need this
+	     to match a real Team ID prefix, so it is only applied when SIGN_IDENTITY
+	     is a Developer ID (see package-app.sh). -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.penguinchat.macos</string>
+	</array>
+</dict>
+</plist>
