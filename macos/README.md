@@ -47,3 +47,32 @@ PENGUINCHAT_API_URL=http://127.0.0.1:3100 swift run PenguinChatMac
 Only `http` and `https` origins with a host are accepted; invalid overrides
 fall back to the local endpoint. API and event details are recorded in
 `docs/macos-api-contract.md`.
+
+## Two-user acceptance run
+
+`macos/scripts/run-acceptance.sh` drives two complete client stacks — the same
+`SessionManager` / `RealtimeChatStore` / `ChatViewModel` the SwiftUI app builds,
+over the real Socket.IO transport — against a live server, and asserts the
+end-to-end chat criteria.
+
+Start the dependencies and API first, then run it:
+
+```bash
+docker compose up -d api
+macos/scripts/run-acceptance.sh                     # defaults to :3100
+PENGUINCHAT_API_URL=http://127.0.0.1:3000 macos/scripts/run-acceptance.sh
+```
+
+It prints one `PASS`/`FAIL` line per check and exits non-zero if any fail. The
+script aborts early with instructions when no healthy server answers `/health`.
+
+Covered: registration and login prerequisites, session restore, friend request
+send/accept, initial presence from both the live event and the REST snapshot,
+bidirectional messages, send acknowledgement, delivery and read receipts,
+unread counts, typing start/stop, forced disconnect, offline send, reconnect
+history convergence, duplicate suppression, ordering, and history pagination
+(`limit` plus the `before` cursor).
+
+Each run registers fresh throwaway users, so it is repeatable against the same
+database without cleanup. Their tokens are held in memory only — the harness
+never touches the app's Keychain item and writes no credentials to disk.

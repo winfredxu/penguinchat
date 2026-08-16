@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "PenguinChatCore", targets: ["PenguinChatCore"]),
         .library(name: "PenguinChatSocketIO", targets: ["PenguinChatSocketIO"]),
         .executable(name: "PenguinChatMac", targets: ["PenguinChatMac"]),
+        .executable(name: "AcceptanceHarness", targets: ["AcceptanceHarness"]),
     ],
     dependencies: [
         .package(
@@ -27,6 +28,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "PenguinChatMac",
+            dependencies: ["PenguinChatCore", "PenguinChatSocketIO"]
+        ),
+        // Two-user acceptance run against a live server. Not part of the app.
+        .executableTarget(
+            name: "AcceptanceHarness",
             dependencies: ["PenguinChatCore", "PenguinChatSocketIO"]
         ),
         .testTarget(
