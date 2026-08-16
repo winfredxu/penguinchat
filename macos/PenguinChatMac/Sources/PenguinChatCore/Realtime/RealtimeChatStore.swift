@@ -85,28 +85,33 @@ public actor RealtimeChatStore {
     private var incomingRequestsByID: [String: FriendRequest] = [:]
     private var socialRefreshRevision = 0
     private var typingUserIDs: Set<String> = []
+    private var typingExpiryTasks: [String: Task<Void, Never>] = [:]
     private var observedPeerIDs: Set<String> = []
     private var bufferedEvents: [RealtimeEvent] = []
     private var isReconciling = false
     private var eventTask: Task<Void, Never>?
     private var reconciliationTask: Task<Void, Never>?
     private var snapshotContinuations: [UUID: AsyncStream<RealtimeChatSnapshot>.Continuation] = [:]
+    private let typingTimeout: Duration
 
     public init(
         transport: any RealtimeTransport,
         credentials: any RealtimeCredentialProviding,
         historyService: any MessageHistoryServing,
-        currentUserID: String
+        currentUserID: String,
+        typingTimeout: Duration = .seconds(4)
     ) {
         self.transport = transport
         self.credentials = credentials
         self.historyService = historyService
         self.currentUserID = currentUserID
+        self.typingTimeout = typingTimeout
     }
 
     deinit {
         eventTask?.cancel()
         reconciliationTask?.cancel()
+        for task in typingExpiryTasks.values { task.cancel() }
     }
 
     public func start() async throws {
@@ -131,6 +136,9 @@ public actor RealtimeChatStore {
         eventTask = nil
         reconciliationTask?.cancel()
         reconciliationTask = nil
+        for task in typingExpiryTasks.values { task.cancel() }
+        typingExpiryTasks.removeAll()
+        typingUserIDs.removeAll()
         await transport.disconnect()
         connection = .disconnected(reason: nil)
     }
@@ -237,6 +245,21 @@ public actor RealtimeChatStore {
         try await transport.markRead(peerID: peerID, upToMessageID: upToMessageID)
     }
 
+    /// Marks the visible incoming range locally before emitting the receipt so
+    /// unread badges react immediately and remain convergent after refetch.
+    public func markVisibleRead(peerID: String, upToMessageID: String) async throws {
+        guard let boundary = messages.first(where: { $0.serverID == upToMessageID }) else { return }
+        let readAt = ISO8601DateFormatter().string(from: Date())
+        for index in messages.indices where
+            messages[index].senderID == peerID &&
+            messages[index].recipientID == currentUserID &&
+            sortKey(messages[index]) <= sortKey(boundary) {
+            messages[index].readAt = messages[index].readAt ?? readAt
+        }
+        publishSnapshot()
+        try await transport.markRead(peerID: peerID, upToMessageID: upToMessageID)
+    }
+
     public func setTyping(_ isTyping: Bool, to peerID: String) async throws {
         try await transport.setTyping(isTyping, toUserID: peerID)
     }
@@ -271,6 +294,9 @@ public actor RealtimeChatStore {
         case let .message(event):
             mergeServerMessage(event.message)
             sortInPlace()
+            if event.message.recipientID == currentUserID {
+                try? await transport.confirmDelivered(messageID: event.message.id)
+            }
         case let .delivery(event):
             if let index = messages.firstIndex(where: { $0.serverID == event.messageID }) {
                 messages[index].deliveredAt = event.deliveredAt
@@ -278,8 +304,7 @@ public actor RealtimeChatStore {
         case let .read(event):
             markMessagesRead(event)
         case let .typing(event):
-            if event.isTyping { typingUserIDs.insert(event.fromUserID) }
-            else { typingUserIDs.remove(event.fromUserID) }
+            updateTyping(event)
         }
         publishSnapshot()
     }
@@ -317,7 +342,14 @@ public actor RealtimeChatStore {
         reconciliationTask = nil
         let buffered = bufferedEvents
         bufferedEvents.removeAll()
-        for event in buffered { applyBuffered(event) }
+        for event in buffered {
+            applyBuffered(event)
+            if case let .message(messageEvent) = event,
+               messageEvent.message.recipientID == currentUserID {
+                let messageID = messageEvent.message.id
+                Task { [transport] in try? await transport.confirmDelivered(messageID: messageID) }
+            }
+        }
         sortInPlace()
         publishSnapshot()
     }
@@ -347,8 +379,7 @@ public actor RealtimeChatStore {
             }
         case let .read(event): markMessagesRead(event)
         case let .typing(event):
-            if event.isTyping { typingUserIDs.insert(event.fromUserID) }
-            else { typingUserIDs.remove(event.fromUserID) }
+            updateTyping(event)
         case .connection: break
         }
     }
@@ -423,6 +454,29 @@ public actor RealtimeChatStore {
             sortKey(messages[index]) <= sortKey(boundary) {
             messages[index].readAt = messages[index].readAt ?? readAt
         }
+    }
+
+    private func updateTyping(_ event: TypingEvent) {
+        typingExpiryTasks[event.fromUserID]?.cancel()
+        typingExpiryTasks[event.fromUserID] = nil
+        guard event.isTyping else {
+            typingUserIDs.remove(event.fromUserID)
+            return
+        }
+        typingUserIDs.insert(event.fromUserID)
+        let peerID = event.fromUserID
+        let timeout = typingTimeout
+        typingExpiryTasks[peerID] = Task { [weak self] in
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            await self?.expireTyping(peerID)
+        }
+    }
+
+    private func expireTyping(_ peerID: String) {
+        typingExpiryTasks[peerID] = nil
+        guard typingUserIDs.remove(peerID) != nil else { return }
+        publishSnapshot()
     }
 
     private func localConversationID(with peerID: String) -> String {

@@ -181,6 +181,7 @@ private struct AuthenticationView: View {
 
 private struct SessionShell: View {
     private enum Destination: Hashable {
+        case conversations
         case contacts
         case requests
     }
@@ -190,8 +191,10 @@ private struct SessionShell: View {
     let errorMessage: String?
     let onSignOut: () -> Void
     @StateObject private var model: ContactsViewModel
-    @State private var destination: Destination? = .contacts
+    @StateObject private var chat: ChatViewModel
+    @State private var destination: Destination? = .conversations
     @State private var selectedContactID: String?
+    @State private var selectedConversationID: String?
     @State private var showingSendRequest = false
 
     init(
@@ -207,10 +210,11 @@ private struct SessionShell: View {
         self.errorMessage = errorMessage
         self.onSignOut = onSignOut
         let client = APIClient(baseURL: environment.apiBaseURL)
+        let historyService = MessageHistoryService(client: client)
         let store = RealtimeChatStore(
             transport: SocketIORealtimeTransport(serverURL: environment.apiBaseURL),
             credentials: sessions,
-            historyService: MessageHistoryService(client: client),
+            historyService: historyService,
             currentUserID: session.user.id
         )
         _model = StateObject(wrappedValue: ContactsViewModel(
@@ -218,11 +222,20 @@ private struct SessionShell: View {
             credentials: sessions,
             store: store
         ))
+        _chat = StateObject(wrappedValue: ChatViewModel(
+            historyService: historyService,
+            credentials: sessions,
+            store: store,
+            currentUserID: session.user.id
+        ))
     }
 
     var body: some View {
         NavigationSplitView {
             List(selection: $destination) {
+                Label("消息", systemImage: "bubble.left.and.bubble.right")
+                    .badge(chat.conversations.reduce(0) { $0 + $1.unreadCount })
+                    .tag(Destination.conversations)
                 Label("联系人", systemImage: "person.2")
                     .badge(model.contacts.count)
                     .tag(Destination.contacts)
@@ -249,7 +262,9 @@ private struct SessionShell: View {
             }
         } content: {
             Group {
-                switch destination ?? .contacts {
+                switch destination ?? .conversations {
+                case .conversations:
+                    conversationsContent
                 case .contacts:
                     contactsContent
                 case .requests:
@@ -258,7 +273,11 @@ private struct SessionShell: View {
             }
             .safeAreaInset(edge: .bottom) { statusBanner }
         } detail: {
-            contactDetail
+            if destination == .conversations {
+                ChatDetailView(model: chat, currentUserID: session.user.id)
+            } else {
+                contactDetail
+            }
         }
         .toolbar {
             Button {
@@ -270,8 +289,40 @@ private struct SessionShell: View {
         .sheet(isPresented: $showingSendRequest) {
             SendFriendRequestView(model: model, isPresented: $showingSendRequest)
         }
-        .task { await model.start() }
-        .onDisappear { Task { await model.stop() } }
+        .task {
+            async let contacts: Void = model.start()
+            async let messages: Void = chat.start()
+            _ = await (contacts, messages)
+        }
+        .onDisappear {
+            Task {
+                await chat.stop()
+                await model.stop()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var conversationsContent: some View {
+        if model.isLoading && !model.hasLoaded {
+            ProgressView("正在加载会话…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if chat.conversations.isEmpty {
+            ContentUnavailableView(
+                "暂无会话",
+                systemImage: "bubble.left.and.bubble.right",
+                description: Text("添加好友后即可开始聊天。")
+            )
+        } else {
+            List(chat.conversations, selection: $selectedConversationID) { conversation in
+                ConversationRow(conversation: conversation, currentUserID: session.user.id)
+                    .tag(conversation.id)
+            }
+            .navigationTitle("消息")
+            .onChange(of: selectedConversationID) {
+                Task { await chat.select(peerID: selectedConversationID) }
+            }
+        }
     }
 
     @ViewBuilder
@@ -397,6 +448,246 @@ private struct SessionShell: View {
     }
 }
 
+private struct ConversationRow: View {
+    let conversation: ConversationSummary
+    let currentUserID: String
+
+    var body: some View {
+        HStack(spacing: 11) {
+            ZStack(alignment: .bottomTrailing) {
+                Text(String(conversation.peer.displayName.prefix(1)).uppercased())
+                    .font(.headline)
+                    .frame(width: 40, height: 40)
+                    .background(Color.accentColor.opacity(0.16), in: Circle())
+                Circle()
+                    .fill(conversation.peer.presence.color)
+                    .frame(width: 10, height: 10)
+                    .overlay(Circle().stroke(.background, lineWidth: 2))
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack {
+                    Text(conversation.peer.displayName).font(.headline)
+                    Spacer()
+                    if let message = conversation.lastMessage {
+                        Text(message.createdAt.chatTime)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                HStack {
+                    if let message = conversation.lastMessage {
+                        Text(message.senderID == currentUserID ? "我：\(message.body)" : message.body)
+                            .lineLimit(1)
+                    } else {
+                        Text("开始聊天")
+                    }
+                    Spacer()
+                    if conversation.unreadCount > 0 {
+                        Text(String(min(conversation.unreadCount, 99)))
+                            .font(.caption2.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.red, in: Capsule())
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct ChatDetailView: View {
+    @ObservedObject var model: ChatViewModel
+    let currentUserID: String
+    @State private var draft = ""
+    @FocusState private var composerFocused: Bool
+
+    var body: some View {
+        Group {
+            if let conversation = model.selectedConversation {
+                VStack(spacing: 0) {
+                    header(conversation)
+                    Divider()
+                    timeline
+                    Divider()
+                    composer
+                }
+            } else {
+                ContentUnavailableView(
+                    "选择一个会话",
+                    systemImage: "bubble.left",
+                    description: Text("从消息列表选择好友开始聊天。")
+                )
+            }
+        }
+    }
+
+    private func header(_ conversation: ConversationSummary) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(conversation.peer.displayName).font(.headline)
+                Text(model.isPeerTyping ? "正在输入…" : conversation.peer.presence.label)
+                    .font(.caption)
+                    .foregroundStyle(model.isPeerTyping ? Color.accentColor : .secondary)
+            }
+            Spacer()
+            if case .connected = model.connection {
+                Label("实时在线", systemImage: "bolt.fill").font(.caption).foregroundStyle(.green)
+            } else {
+                Label("连接中断", systemImage: "bolt.slash").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private var timeline: some View {
+        if model.isLoadingHistory && model.messages.isEmpty {
+            ProgressView("正在加载聊天记录…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let error = model.errorMessage, model.messages.isEmpty {
+            ContentUnavailableView {
+                Label("无法加载聊天记录", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(error)
+            } actions: {
+                Button("重试") {
+                    guard let peerID = model.selectedConversation?.id else { return }
+                    Task {
+                        await model.select(peerID: nil)
+                        await model.select(peerID: peerID)
+                    }
+                }
+            }
+        } else if model.messages.isEmpty {
+            ContentUnavailableView(
+                "还没有消息",
+                systemImage: "hand.wave",
+                description: Text("发一条消息打个招呼吧。")
+            )
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 9) {
+                        if model.hasMoreHistory {
+                            Button(model.isLoadingOlder ? "加载中…" : "加载更早消息") {
+                                Task { await model.loadOlder() }
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .disabled(model.isLoadingOlder)
+                            .padding(.vertical, 8)
+                        }
+                        ForEach(model.messages) { message in
+                            MessageBubble(
+                                message: message,
+                                isMine: message.senderID == currentUserID,
+                                retry: {
+                                    if let clientID = message.clientMessageID {
+                                        Task { await model.retry(clientMessageID: clientID) }
+                                    }
+                                }
+                            )
+                            .id(message.id)
+                        }
+                    }
+                    .padding(16)
+                }
+                .onChange(of: model.messages.last?.id) {
+                    guard let id = model.messages.last?.id else { return }
+                    withAnimation { proxy.scrollTo(id, anchor: .bottom) }
+                }
+                .onAppear {
+                    if let id = model.messages.last?.id { proxy.scrollTo(id, anchor: .bottom) }
+                    composerFocused = true
+                }
+            }
+        }
+    }
+
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            TextField("输入消息", text: $draft, axis: .vertical)
+                .lineLimit(1...5)
+                .textFieldStyle(.roundedBorder)
+                .focused($composerFocused)
+                .onChange(of: draft) { model.composerDidChange(draft) }
+                .onSubmit { submit() }
+            Button(action: submit) {
+                Image(systemName: "paperplane.fill")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.count > 4_000)
+            .keyboardShortcut(.return, modifiers: .command)
+        }
+        .padding(12)
+    }
+
+    private func submit() {
+        let body = draft
+        guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        draft = ""
+        Task {
+            if !(await model.send(body)) { draft = body }
+            composerFocused = true
+        }
+    }
+}
+
+private struct MessageBubble: View {
+    let message: ReconciledMessage
+    let isMine: Bool
+    let retry: () -> Void
+
+    var body: some View {
+        HStack {
+            if isMine { Spacer(minLength: 80) }
+            VStack(alignment: isMine ? .trailing : .leading, spacing: 4) {
+                Text(message.body)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(isMine ? Color.accentColor : Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                    .foregroundStyle(isMine ? Color.white : Color.primary)
+                HStack(spacing: 5) {
+                    Text(message.createdAt.chatTime)
+                    if isMine { status }
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+            if !isMine { Spacer(minLength: 80) }
+        }
+    }
+
+    @ViewBuilder
+    private var status: some View {
+        switch message.outboundState {
+        case .pending:
+            Label("发送中", systemImage: "clock")
+        case let .failed(reason):
+            Button(action: retry) {
+                Label("发送失败，重试", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.plain)
+            .help(reason)
+        case .sent:
+            if message.readAt != nil {
+                Label("已读", systemImage: "checkmark.circle.fill")
+            } else if message.deliveredAt != nil {
+                Label("已送达", systemImage: "checkmark.circle")
+            } else {
+                Label("已发送", systemImage: "checkmark")
+            }
+        }
+    }
+}
+
 private struct ContactRow: View {
     let contact: Contact
 
@@ -491,5 +782,13 @@ private extension Presence {
 
     var color: Color {
         switch self { case .online: .green; case .away: .orange; case .offline: .secondary }
+    }
+}
+
+private extension String {
+    var chatTime: String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: self) else { return self }
+        return date.formatted(date: .omitted, time: .shortened)
     }
 }
