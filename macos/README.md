@@ -136,7 +136,9 @@ Signing notes:
   every required size in code and runs `iconutil`, so no binary asset is checked
   in beyond the resulting `.icns`.
 
-## Two-user acceptance run
+## Two-user acceptance runs
+
+### Native client harness
 
 `macos/scripts/run-acceptance.sh` drives two complete client stacks — the same
 `SessionManager` / `RealtimeChatStore` / `ChatViewModel` the SwiftUI app builds,
@@ -172,3 +174,36 @@ never touches the app's Keychain item and writes no credentials to disk. The
 restart-restore section uses a per-run QA service name
 (`com.penguinchat.macos.acceptance.<uuid>`) and deletes the item afterwards, so
 the shipping app's session is never disturbed.
+
+### Server-contract harness
+
+The repository includes a credential-free harness that exercises the same REST
+and Socket.IO contract as two native clients. It creates uniquely named users,
+so it is safe to rerun against a local development database. From the repository
+root:
+
+```bash
+npm ci
+docker compose up -d --build postgres redis api
+npm run acceptance:two-user
+```
+
+The API is expected at `http://127.0.0.1:3100`. Override it when needed:
+
+```bash
+PENGUINCHAT_API_URL=http://127.0.0.1:3000 npm run acceptance:two-user
+```
+
+The harness verifies registration and login, friend request send/accept,
+offline and online presence, messages in both directions, typing start/stop,
+delivered/read transitions, retry idempotency, forced disconnect/reconnect, and
+identical duplicate-free history on both sides. It prints one JSON result with
+`"ok": true` on success and exits nonzero on the first failed assertion.
+
+For the native client regression gate, run:
+
+```bash
+cd macos/PenguinChatMac
+swift test
+swift build -c release
+```

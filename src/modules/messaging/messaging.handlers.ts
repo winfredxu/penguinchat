@@ -3,7 +3,7 @@ import type { Pool } from "pg";
 import { AppError } from "../../lib/errors.js";
 import type { SessionRegistry } from "../session-registry/session-registry.js";
 import { findById } from "./messaging.repo.js";
-import { markDelivered, markRead, send } from "./messaging.service.js";
+import { markDelivered, markRead, sendIdempotent } from "./messaging.service.js";
 
 export interface MessagingHandlerDeps {
   pool: Pool;
@@ -28,8 +28,10 @@ export function registerMessagingHandlers(io: Server, deps: MessagingHandlerDeps
     socket.on("message:send", (payload: { toUserId: string; body: string; clientMsgId: string }, ack: (r: unknown) => void) => {
       (async () => {
         try {
-          const message = await send(pool, userId, { toUserId: payload.toUserId, body: payload.body });
-          await registry.notify(payload.toUserId, "message:new", { message });
+          const { message, inserted } = await sendIdempotent(pool, userId, payload);
+          if (inserted) {
+            await registry.notify(payload.toUserId, "message:new", { message });
+          }
           ack({ id: message.id, created_at: message.created_at, clientMsgId: payload.clientMsgId });
         } catch (err) {
           ack({ error: err instanceof AppError ? err.code : "internal" });
