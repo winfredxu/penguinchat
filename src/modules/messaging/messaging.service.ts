@@ -4,6 +4,7 @@ import { conversationId } from "../../lib/ids.js";
 import { areFriends } from "../contacts/contacts.repo.js";
 import {
   insert,
+  insertIdempotent,
   listByConversation,
   markDelivered as repoMarkDelivered,
   markRead as repoMarkRead,
@@ -26,6 +27,23 @@ export async function send(
     senderId,
     recipientId: input.toUserId,
     body: input.body,
+  });
+}
+
+export async function sendIdempotent(
+  pool: Pool,
+  senderId: string,
+  input: { toUserId: string; body: string; clientMsgId: string }
+): Promise<{ message: MessageRow; inserted: boolean }> {
+  if (!(await areFriends(pool, senderId, input.toUserId))) {
+    throw new AppError(403, "not_friends", "You can only message friends");
+  }
+  return insertIdempotent(pool, {
+    conversation: conversationId(senderId, input.toUserId),
+    senderId,
+    recipientId: input.toUserId,
+    body: input.body,
+    clientMsgId: input.clientMsgId,
   });
 }
 

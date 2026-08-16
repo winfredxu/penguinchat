@@ -12,7 +12,8 @@
     "dev": "tsx watch src/server.ts",
     "migrate": "tsx src/db/migrate.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "acceptance:two-user": "node scripts/two-user-acceptance.mjs"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

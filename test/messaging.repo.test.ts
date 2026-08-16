@@ -7,6 +7,7 @@ import { insertUser } from "../src/modules/auth/auth.repo.js";
 import { hashPassword } from "../src/modules/auth/password.js";
 import {
   insert,
+  insertIdempotent,
   findById,
   markDelivered,
   markRead,
@@ -38,6 +39,23 @@ test("insert + findById round-trips a message row", async () => {
   expect(msg.read_at).toBeNull();
   const found = await findById(pool, msg.id);
   expect(found?.body).toBe("hi");
+});
+
+test("insertIdempotent reuses the sender's message for the same client id", async () => {
+  const { a, b } = await seedUsers();
+  const input = {
+    conversation: CONV,
+    senderId: a.id,
+    recipientId: b.id,
+    body: "retry once",
+    clientMsgId: "client-retry-1",
+  };
+  const first = await insertIdempotent(pool, input);
+  const retry = await insertIdempotent(pool, input);
+  expect(first.inserted).toBe(true);
+  expect(retry.inserted).toBe(false);
+  expect(retry.message.id).toBe(first.message.id);
+  expect(retry.message.client_msg_id).toBe(input.clientMsgId);
 });
 
 test("markDelivered sets delivered_at and is idempotent", async () => {

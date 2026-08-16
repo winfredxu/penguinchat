@@ -31,6 +31,30 @@ test("message:send acks the sender and delivers message:new to the recipient", a
   bobSock.disconnect();
 });
 
+test("retrying message:send with the same clientMsgId is idempotent", async () => {
+  const { a: alice, b: bob } = await makeFriends(stack.app, "alice_retry", "bob_retry");
+  const aliceSock = await socketClient(stack.port, alice.accessToken);
+  const bobSock = await socketClient(stack.port, bob.accessToken);
+  const received: unknown[] = [];
+  bobSock.on("message:new", (event) => received.push(event));
+  const payload = { toUserId: bob.id, body: "send exactly once", clientMsgId: "stable-client-id" };
+
+  const first = (await emitAck(aliceSock, "message:send", payload)) as { id: string };
+  const retry = (await emitAck(aliceSock, "message:send", payload)) as { id: string };
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  expect(retry.id).toBe(first.id);
+  expect(received).toHaveLength(1);
+  const history = await stack.app.inject({
+    method: "GET",
+    url: `/conversations/${bob.id}/messages`,
+    headers: { authorization: `Bearer ${alice.accessToken}` },
+  });
+  expect(history.json().messages.map((message: { id: string }) => message.id)).toEqual([first.id]);
+  aliceSock.disconnect();
+  bobSock.disconnect();
+});
+
 test("message:delivered marks delivered_at and notifies the sender", async () => {
   const { a: alice, b: bob } = await makeFriends(stack.app, "alice2", "bob2");
   const aliceSock = await socketClient(stack.port, alice.accessToken);
