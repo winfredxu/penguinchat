@@ -1,4 +1,5 @@
 import PenguinChatCore
+import PenguinChatSocketIO
 import SwiftUI
 
 struct RootView: View {
@@ -23,10 +24,14 @@ struct RootView: View {
             case let .signedIn(session):
                 SessionShell(
                     session: session,
+                    sessions: authentication.sessions,
+                    environment: environment,
                     isSigningOut: authentication.isSubmitting,
                     errorMessage: authentication.errorMessage,
                     onSignOut: { Task { await authentication.logout() } }
                 )
+                // Rebuild the session-scoped stores when the signed-in user changes.
+                .id(session.user.id)
             }
         }
         .task { await authentication.restore() }
@@ -182,44 +187,85 @@ private struct SessionShell: View {
     let errorMessage: String?
     let onSignOut: () -> Void
 
+    @StateObject private var contacts: ContactsModel
+    private let realtime: RealtimeChatStore
+    @State private var selectedContactID: String?
+
+    init(
+        session: AuthenticatedSession,
+        sessions: SessionManager,
+        environment: AppEnvironment,
+        isSigningOut: Bool,
+        errorMessage: String?,
+        onSignOut: @escaping () -> Void
+    ) {
+        self.session = session
+        self.isSigningOut = isSigningOut
+        self.errorMessage = errorMessage
+        self.onSignOut = onSignOut
+
+        let client = APIClient(baseURL: environment.apiBaseURL)
+        let realtimeStore = RealtimeChatStore(
+            transport: SocketIORealtimeTransport(serverURL: environment.realtimeBaseURL),
+            credentials: sessions,
+            historyService: MessageHistoryService(client: client),
+            currentUserID: session.user.id
+        )
+        self.realtime = realtimeStore
+        _contacts = StateObject(wrappedValue: ContactsModel(
+            contactsStore: ContactsStore(
+                service: ContactsService(client: client),
+                credentials: sessions,
+                presenceSink: realtimeStore
+            ),
+            realtimeStore: realtimeStore
+        ))
+    }
+
     var body: some View {
         NavigationSplitView {
-            List {
-                Label("最近会话", systemImage: "bubble.left.and.bubble.right")
-                Label("联系人", systemImage: "person.2")
-            }
-            .navigationTitle("PenguinChat")
-            .safeAreaInset(edge: .bottom) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Divider()
-                    Text(session.user.displayName).font(.headline)
-                    Text("@\(session.user.username)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("退出登录", action: onSignOut)
-                        .disabled(isSigningOut)
+            ContactsView(model: contacts, selectedContactID: $selectedContactID)
+                .safeAreaInset(edge: .bottom) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Divider()
+                        Text(session.user.displayName).font(.headline)
+                        Text("@\(session.user.username)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Button("退出登录", action: onSignOut)
+                            .disabled(isSigningOut)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        } content: {
-            ContentUnavailableView(
-                "暂无会话",
-                systemImage: "snowflake",
-                description: Text("联系人和会话将在下一阶段显示在这里。")
-            )
-            .navigationTitle("会话")
         } detail: {
             VStack {
-                ContentUnavailableView(
-                    "选择一位好友开始聊天",
-                    systemImage: "message",
-                    description: Text("认证已完成，实时聊天将在下一阶段接入。")
-                )
+                if let selectedContact = contacts.rows.first(where: { $0.id == selectedContactID }) {
+                    ContentUnavailableView(
+                        selectedContact.contact.displayName,
+                        systemImage: "message",
+                        description: Text("聊天界面将在下一阶段接入。")
+                    )
+                    .navigationTitle(selectedContact.contact.displayName)
+                } else {
+                    ContentUnavailableView(
+                        "选择一位好友开始聊天",
+                        systemImage: "message",
+                        description: Text("在左侧选择联系人。")
+                    )
+                }
                 if let errorMessage {
                     Text(errorMessage).foregroundStyle(.red).font(.callout)
                 }
             }
+        }
+        .task {
+            try? await realtime.start()
+            await contacts.start()
+        }
+        .onDisappear {
+            contacts.stop()
+            Task { await realtime.stop() }
         }
     }
 }

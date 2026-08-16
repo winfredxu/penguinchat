@@ -8,10 +8,9 @@ use a `WKWebView` or embed the React client.
 - macOS 14 Sonoma or newer.
 - Xcode 16 or newer with Swift 6; the bootstrap was verified with Xcode 26.6.
 - Swift Package Manager is the only package manager.
-- Stage 1 uses Apple frameworks only (`SwiftUI`, `Foundation`). The future
-  Socket.IO adapter must live behind a `RealtimeTransport` protocol and be
-  pinned to an exact compatible release of `socket.io-client-swift`; UI and
-  domain code must not import the package directly.
+- `socket.io-client-swift` is pinned to exactly 16.1.1 and confined to the
+  `PenguinChatSocketIO` adapter target behind the `RealtimeTransport` protocol.
+  UI and domain code must not import the package directly.
 
 The package separates `PenguinChatCore` (configuration, models, HTTP transport,
 services, Keychain token storage, and session lifecycle) from the
@@ -47,3 +46,21 @@ PENGUINCHAT_API_URL=http://127.0.0.1:3100 swift run PenguinChatMac
 Only `http` and `https` origins with a host are accepted; invalid overrides
 fall back to the local endpoint. API and event details are recorded in
 `docs/macos-api-contract.md`.
+
+## Contacts, friend requests, and presence
+
+`ContactsStore` owns the roster and incoming requests; it never caches presence.
+The REST contact snapshot is forwarded into `RealtimeChatStore` through
+`PresenceMerging`, and the UI reads presence back from that one store, so a REST
+refetch and a live `presence:update` cannot disagree. Reloads carry a generation
+token: a response that arrives after a newer reload started is discarded rather
+than applied.
+
+To check the roster contract against a running API:
+
+```bash
+PENGUINCHAT_API_URL=http://127.0.0.1:3100 ./macos/scripts/verify-contacts-flow.sh
+```
+
+It registers two users, sends and accepts a friend request, and asserts both
+sides end up with exactly one contact row carrying presence.

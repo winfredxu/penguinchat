@@ -13,7 +13,9 @@ final class AuthenticationModel: ObservableObject {
     @Published private(set) var isSubmitting = false
     @Published var errorMessage: String?
 
-    private let sessions: SessionManager
+    /// Shared with the session-scoped stores so contacts, realtime, and auth all
+    /// rotate the same tokens.
+    let sessions: SessionManager
     private var didRestore = false
 
     init(environment: AppEnvironment) {
