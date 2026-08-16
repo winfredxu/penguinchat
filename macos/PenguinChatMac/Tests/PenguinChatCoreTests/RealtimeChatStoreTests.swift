@@ -52,6 +52,29 @@ private actor FakeRealtimeCredentials: RealtimeCredentialProviding {
     }
 }
 
+private actor DelayedAckTransport: RealtimeTransport {
+    let stream: AsyncStream<RealtimeEvent>
+    private let continuation: AsyncStream<RealtimeEvent>.Continuation
+    private var acknowledgementWaiter: CheckedContinuation<SendAcknowledgement, Error>?
+    var sentRequests: [SendMessageRequest] = []
+
+    init() { (stream, continuation) = AsyncStream.makeStream(of: RealtimeEvent.self) }
+    func events() async -> AsyncStream<RealtimeEvent> { stream }
+    func connect(accessToken: String) async {}
+    func disconnect() async {}
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendAcknowledgement {
+        sentRequests.append(request)
+        return try await withCheckedThrowingContinuation { acknowledgementWaiter = $0 }
+    }
+    func confirmDelivered(messageID: String) async throws {}
+    func markRead(peerID: String, upToMessageID: String) async throws {}
+    func setTyping(_ isTyping: Bool, toUserID: String) async throws {}
+    func release(_ acknowledgement: SendAcknowledgement) {
+        acknowledgementWaiter?.resume(returning: acknowledgement)
+        acknowledgementWaiter = nil
+    }
+}
+
 private actor FakeMessageHistoryService: MessageHistoryServing {
     var responses: [String: [ChatMessage]]
     var calls: [String] = []
@@ -150,6 +173,36 @@ private func eventually(_ predicate: @escaping @Sendable () async -> Bool) async
     #expect(snapshot.messages[0].outboundState == .sent)
 }
 
+@Test func historyArrivingBeforeAcknowledgementReconcilesTheOptimisticMessage() async throws {
+    let transport = DelayedAckTransport()
+    let store = RealtimeChatStore(
+        transport: transport,
+        credentials: FakeRealtimeCredentials(accessToken: "token"),
+        historyService: FakeMessageHistoryService(),
+        currentUserID: "alice"
+    )
+    let sendTask = Task {
+        await store.send(body: "racing", to: "bob", clientMessageID: "client-race")
+    }
+    try await eventually { await transport.sentRequests.count == 1 }
+
+    await store.mergeHistory([
+        message(id: "server-race", body: "racing", createdAt: "2026-08-15T10:00:00.000Z")
+    ], peerID: "bob")
+    await transport.release(SendAcknowledgement(
+        id: "server-race",
+        createdAt: "2026-08-15T10:00:00.000Z",
+        clientMessageID: "client-race",
+        error: nil
+    ))
+    _ = await sendTask.value
+
+    let snapshot = await store.snapshot()
+    #expect(snapshot.messages.count == 1)
+    #expect(snapshot.messages[0].serverID == "server-race")
+    #expect(snapshot.messages[0].clientMessageID == "client-race")
+}
+
 @Test func duplicateLiveMessageAndDeliveryEventsAreIdempotent() async throws {
     let transport = FakeRealtimeTransport()
     let store = makeStore(
@@ -244,5 +297,72 @@ private func eventually(_ predicate: @escaping @Sendable () async -> Bool) async
     #expect(await transport.deliveredIDs == ["m-1"])
     #expect(await transport.readRequests.count == 1)
     #expect(await transport.typingRequests.count == 1)
+    await store.stop()
+}
+
+@Test func failedMessageRetriesWithTheSameStableClientIdentifier() async {
+    let transport = FakeRealtimeTransport()
+    let store = makeStore(
+        transport: transport,
+        credentials: FakeRealtimeCredentials(accessToken: "token"),
+        history: FakeMessageHistoryService()
+    )
+
+    _ = await store.send(body: "retry me", to: "bob", clientMessageID: "stable-client-id")
+    await transport.enqueue(SendAcknowledgement(
+        id: "server-after-retry",
+        createdAt: "2026-08-15T10:00:00.000Z",
+        clientMessageID: "stable-client-id",
+        error: nil
+    ))
+    await store.retry(clientMessageID: "stable-client-id")
+
+    #expect(await transport.sentRequests.map(\.clientMessageID) == ["stable-client-id", "stable-client-id"])
+    let snapshot = await store.snapshot()
+    #expect(snapshot.messages.count == 1)
+    #expect(snapshot.messages[0].serverID == "server-after-retry")
+    #expect(snapshot.messages[0].outboundState == .sent)
+}
+
+@Test func incomingMessageAutomaticallyConfirmsDeliveryAndVisibleReadClearsUnreadState() async throws {
+    let transport = FakeRealtimeTransport()
+    let store = makeStore(
+        transport: transport,
+        credentials: FakeRealtimeCredentials(accessToken: "token"),
+        history: FakeMessageHistoryService()
+    )
+    try await store.start()
+    let incoming = message(
+        id: "incoming-1",
+        sender: "bob",
+        recipient: "alice",
+        body: "hello",
+        createdAt: "2026-08-15T10:00:00.000Z"
+    )
+
+    await transport.emit(.message(NewMessageEvent(message: incoming)))
+    try await eventually { await transport.deliveredIDs == ["incoming-1"] }
+    try await store.markVisibleRead(peerID: "bob", upToMessageID: "incoming-1")
+
+    #expect(await transport.readRequests.count == 1)
+    #expect(await store.snapshot().messages[0].readAt != nil)
+    await store.stop()
+}
+
+@Test func typingIndicatorExpiresWithoutAStopEvent() async throws {
+    let transport = FakeRealtimeTransport()
+    let store = RealtimeChatStore(
+        transport: transport,
+        credentials: FakeRealtimeCredentials(accessToken: "token"),
+        historyService: FakeMessageHistoryService(),
+        currentUserID: "alice",
+        typingTimeout: .milliseconds(25)
+    )
+    try await store.start()
+
+    await transport.emit(.typing(TypingEvent(fromUserID: "bob", isTyping: true)))
+    try await eventually { await store.snapshot().typingUserIDs.contains("bob") }
+    try await eventually { !(await store.snapshot().typingUserIDs.contains("bob")) }
+
     await store.stop()
 }
