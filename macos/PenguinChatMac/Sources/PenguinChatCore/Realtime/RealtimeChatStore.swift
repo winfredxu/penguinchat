@@ -131,6 +131,19 @@ public actor RealtimeChatStore {
         )
     }
 
+    /// Seeds presence from an authoritative REST snapshot. Live `presence:update`
+    /// deltas and later snapshots both overwrite, so the store stays the single
+    /// source of truth instead of the UI keeping a parallel presence cache.
+    public func mergePresenceSnapshot(_ presenceByUserID: [String: Presence]) {
+        for (userID, status) in presenceByUserID {
+            self.presenceByUserID[userID] = status
+        }
+    }
+
+    public func presence(for userID: String) -> Presence {
+        presenceByUserID[userID] ?? .offline
+    }
+
     public func mergeHistory(_ history: [ChatMessage], peerID: String) {
         observedPeerIDs.insert(peerID)
         for message in history { mergeServerMessage(message) }
