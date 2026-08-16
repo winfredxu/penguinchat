@@ -9,6 +9,7 @@ export interface MessageRow {
   created_at: string;
   delivered_at: string | null;
   read_at: string | null;
+  client_msg_id: string | null;
 }
 
 // pg returns Date objects for timestamptz columns; normalize to ISO strings so
@@ -29,6 +30,7 @@ function mapRow(r: {
   created_at: unknown;
   delivered_at: unknown;
   read_at: unknown;
+  client_msg_id: string | null;
 }): MessageRow {
   return {
     id: r.id,
@@ -39,6 +41,7 @@ function mapRow(r: {
     created_at: asString(r.created_at) as string,
     delivered_at: asString(r.delivered_at),
     read_at: asString(r.read_at),
+    client_msg_id: r.client_msg_id,
   };
 }
 
@@ -52,6 +55,41 @@ export async function insert(
     [input.conversation, input.senderId, input.recipientId, input.body]
   );
   return mapRow(res.rows[0]);
+}
+
+export async function insertIdempotent(
+  pool: Pool,
+  input: {
+    conversation: string;
+    senderId: string;
+    recipientId: string;
+    body: string;
+    clientMsgId: string;
+  }
+): Promise<{ message: MessageRow; inserted: boolean }> {
+  const inserted = await pool.query(
+    `INSERT INTO messages
+       (conversation, sender_id, recipient_id, body, client_msg_id)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (sender_id, client_msg_id)
+       WHERE client_msg_id IS NOT NULL
+       DO NOTHING
+     RETURNING *`,
+    [input.conversation, input.senderId, input.recipientId, input.body, input.clientMsgId]
+  );
+  if (inserted.rowCount) {
+    return { message: mapRow(inserted.rows[0]), inserted: true };
+  }
+
+  const existing = await pool.query(
+    `SELECT * FROM messages
+     WHERE sender_id = $1 AND client_msg_id = $2`,
+    [input.senderId, input.clientMsgId]
+  );
+  if (!existing.rowCount) {
+    throw new Error("idempotent message insert lost its conflicting row");
+  }
+  return { message: mapRow(existing.rows[0]), inserted: false };
 }
 
 export async function findById(pool: Pool, messageId: string): Promise<MessageRow | null> {
