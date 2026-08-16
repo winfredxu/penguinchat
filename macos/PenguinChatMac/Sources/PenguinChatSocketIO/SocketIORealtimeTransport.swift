@@ -141,6 +141,8 @@ public final class SocketIORealtimeTransport: @unchecked Sendable, RealtimeTrans
         }
 
         socket.on("presence:update") { [weak self] data, _ in self?.forward(PresenceUpdate.self, data, event: RealtimeEvent.presence) }
+        socket.on("friend:request") { [weak self] data, _ in self?.forward(FriendRequestEvent.self, data, event: RealtimeEvent.friendRequest) }
+        socket.on("friend:accepted") { [weak self] data, _ in self?.forward(FriendAcceptedEvent.self, data, event: RealtimeEvent.friendAccepted) }
         socket.on("message:new") { [weak self] data, _ in self?.forward(NewMessageEvent.self, data, event: RealtimeEvent.message) }
         socket.on("message:delivered") { [weak self] data, _ in self?.forward(DeliveryEvent.self, data, event: RealtimeEvent.delivery) }
         socket.on("message:read") { [weak self] data, _ in self?.forward(ReadEvent.self, data, event: RealtimeEvent.read) }

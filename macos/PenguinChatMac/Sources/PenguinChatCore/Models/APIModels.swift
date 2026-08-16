@@ -31,6 +31,36 @@ public struct Contact: Codable, Equatable, Sendable, Identifiable {
     public let createdAt: String
     public let presence: Presence
 
+    public init(
+        id: String,
+        username: String,
+        displayName: String,
+        avatarURL: String? = nil,
+        signature: String? = nil,
+        createdAt: String,
+        presence: Presence
+    ) {
+        self.id = id
+        self.username = username
+        self.displayName = displayName
+        self.avatarURL = avatarURL
+        self.signature = signature
+        self.createdAt = createdAt
+        self.presence = presence
+    }
+
+    public func withPresence(_ presence: Presence) -> Contact {
+        Contact(
+            id: id,
+            username: username,
+            displayName: displayName,
+            avatarURL: avatarURL,
+            signature: signature,
+            createdAt: createdAt,
+            presence: presence
+        )
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, username, signature, presence
         case displayName = "display_name"
@@ -48,6 +78,26 @@ public struct FriendRequest: Codable, Equatable, Sendable, Identifiable {
     public let createdAt: String
     public let fromUsername: String?
     public let fromDisplayName: String?
+
+    public init(
+        id: String,
+        fromUser: String,
+        toUser: String,
+        message: String? = nil,
+        status: String = "pending",
+        createdAt: String,
+        fromUsername: String? = nil,
+        fromDisplayName: String? = nil
+    ) {
+        self.id = id
+        self.fromUser = fromUser
+        self.toUser = toUser
+        self.message = message
+        self.status = status
+        self.createdAt = createdAt
+        self.fromUsername = fromUsername
+        self.fromDisplayName = fromDisplayName
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, message, status

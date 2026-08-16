@@ -1,4 +1,5 @@
 import PenguinChatCore
+import PenguinChatSocketIO
 import SwiftUI
 
 struct RootView: View {
@@ -22,7 +23,9 @@ struct RootView: View {
                 )
             case let .signedIn(session):
                 SessionShell(
+                    environment: environment,
                     session: session,
+                    sessions: authentication.sessions,
                     isSigningOut: authentication.isSubmitting,
                     errorMessage: authentication.errorMessage,
                     onSignOut: { Task { await authentication.logout() } }
@@ -177,16 +180,55 @@ private struct AuthenticationView: View {
 }
 
 private struct SessionShell: View {
+    private enum Destination: Hashable {
+        case contacts
+        case requests
+    }
+
     let session: AuthenticatedSession
     let isSigningOut: Bool
     let errorMessage: String?
     let onSignOut: () -> Void
+    @StateObject private var model: ContactsViewModel
+    @State private var destination: Destination? = .contacts
+    @State private var selectedContactID: String?
+    @State private var showingSendRequest = false
+
+    init(
+        environment: AppEnvironment,
+        session: AuthenticatedSession,
+        sessions: SessionManager,
+        isSigningOut: Bool,
+        errorMessage: String?,
+        onSignOut: @escaping () -> Void
+    ) {
+        self.session = session
+        self.isSigningOut = isSigningOut
+        self.errorMessage = errorMessage
+        self.onSignOut = onSignOut
+        let client = APIClient(baseURL: environment.apiBaseURL)
+        let store = RealtimeChatStore(
+            transport: SocketIORealtimeTransport(serverURL: environment.apiBaseURL),
+            credentials: sessions,
+            historyService: MessageHistoryService(client: client),
+            currentUserID: session.user.id
+        )
+        _model = StateObject(wrappedValue: ContactsViewModel(
+            service: ContactsService(client: client),
+            credentials: sessions,
+            store: store
+        ))
+    }
 
     var body: some View {
         NavigationSplitView {
-            List {
-                Label("最近会话", systemImage: "bubble.left.and.bubble.right")
+            List(selection: $destination) {
                 Label("联系人", systemImage: "person.2")
+                    .badge(model.contacts.count)
+                    .tag(Destination.contacts)
+                Label("好友请求", systemImage: "person.crop.circle.badge.plus")
+                    .badge(model.incomingRequests.count)
+                    .tag(Destination.requests)
             }
             .navigationTitle("PenguinChat")
             .safeAreaInset(edge: .bottom) {
@@ -196,6 +238,9 @@ private struct SessionShell: View {
                     Text("@\(session.user.username)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Label(connectionLabel, systemImage: connectionSymbol)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Button("退出登录", action: onSignOut)
                         .disabled(isSigningOut)
                 }
@@ -203,23 +248,248 @@ private struct SessionShell: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         } content: {
-            ContentUnavailableView(
-                "暂无会话",
-                systemImage: "snowflake",
-                description: Text("联系人和会话将在下一阶段显示在这里。")
-            )
-            .navigationTitle("会话")
-        } detail: {
-            VStack {
-                ContentUnavailableView(
-                    "选择一位好友开始聊天",
-                    systemImage: "message",
-                    description: Text("认证已完成，实时聊天将在下一阶段接入。")
-                )
-                if let errorMessage {
-                    Text(errorMessage).foregroundStyle(.red).font(.callout)
+            Group {
+                switch destination ?? .contacts {
+                case .contacts:
+                    contactsContent
+                case .requests:
+                    requestsContent
                 }
             }
+            .safeAreaInset(edge: .bottom) { statusBanner }
+        } detail: {
+            contactDetail
         }
+        .toolbar {
+            Button {
+                showingSendRequest = true
+            } label: {
+                Label("添加好友", systemImage: "person.badge.plus")
+            }
+        }
+        .sheet(isPresented: $showingSendRequest) {
+            SendFriendRequestView(model: model, isPresented: $showingSendRequest)
+        }
+        .task { await model.start() }
+        .onDisappear { Task { await model.stop() } }
+    }
+
+    @ViewBuilder
+    private var contactsContent: some View {
+        if model.isLoading && !model.hasLoaded {
+            ProgressView("正在加载联系人…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if !model.hasLoaded, model.errorMessage != nil {
+            retryView(title: "无法加载联系人", symbol: "wifi.exclamationmark")
+        } else if model.contacts.isEmpty {
+            ContentUnavailableView(
+                "还没有好友",
+                systemImage: "person.2.slash",
+                description: Text("发送好友请求，接受后会显示在这里。")
+            )
+        } else {
+            List(model.contacts, selection: $selectedContactID) { contact in
+                ContactRow(contact: contact).tag(contact.id)
+            }
+            .navigationTitle("联系人")
+            .refreshable { await model.reload(replacePresence: true) }
+        }
+    }
+
+    @ViewBuilder
+    private var requestsContent: some View {
+        if model.isLoading && !model.hasLoaded {
+            ProgressView("正在加载好友请求…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if !model.hasLoaded, model.errorMessage != nil {
+            retryView(title: "无法加载好友请求", symbol: "arrow.clockwise.circle")
+        } else if model.incomingRequests.isEmpty {
+            ContentUnavailableView(
+                "暂无好友请求",
+                systemImage: "person.crop.circle.badge.checkmark",
+                description: Text("新的请求会实时出现在这里。")
+            )
+        } else {
+            List(model.incomingRequests) { request in
+                FriendRequestRow(
+                    request: request,
+                    isMutating: model.mutatingRequestIDs.contains(request.id),
+                    accept: { Task { await model.accept(request) } },
+                    decline: { Task { await model.decline(request) } }
+                )
+            }
+            .navigationTitle("好友请求")
+            .refreshable { await model.reload(replacePresence: true) }
+        }
+    }
+
+    @ViewBuilder
+    private var contactDetail: some View {
+        if let contact = model.contacts.first(where: { $0.id == selectedContactID }) {
+            VStack(spacing: 14) {
+                Text(String(contact.displayName.prefix(1)).uppercased())
+                    .font(.system(size: 42, weight: .semibold))
+                    .frame(width: 88, height: 88)
+                    .background(Color.accentColor.opacity(0.18), in: Circle())
+                Text(contact.displayName).font(.title2.bold())
+                Text("@\(contact.username)").foregroundStyle(.secondary)
+                Label(contact.presence.label, systemImage: contact.presence.symbol)
+                    .foregroundStyle(contact.presence.color)
+                if let signature = contact.signature, !signature.isEmpty {
+                    Text(signature).foregroundStyle(.secondary)
+                }
+            }
+            .padding(36)
+        } else {
+            ContentUnavailableView(
+                "选择一位好友",
+                systemImage: "person.crop.circle",
+                description: Text("查看在线状态和个人资料。")
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var statusBanner: some View {
+        if let message = model.errorMessage ?? errorMessage {
+            HStack {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                Spacer()
+                Button("重试") { Task { await model.reload(replacePresence: true) } }
+            }
+            .font(.callout)
+            .padding(10)
+            .background(.bar)
+        } else if let message = model.confirmationMessage {
+            Label(message, systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .font(.callout)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.bar)
+        }
+    }
+
+    private func retryView(title: String, symbol: String) -> some View {
+        ContentUnavailableView {
+            Label(title, systemImage: symbol)
+        } description: {
+            Text(model.errorMessage ?? "请检查网络后重试。")
+        } actions: {
+            Button("重试") { Task { await model.reload(replacePresence: true) } }
+                .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private var connectionLabel: String {
+        switch model.connection {
+        case .connected: "实时在线"
+        case .connecting, .reconnecting: "正在连接"
+        case .authenticationFailed: "登录已失效"
+        case .disconnected, .failed: "实时连接离线"
+        }
+    }
+
+    private var connectionSymbol: String {
+        if case .connected = model.connection { return "bolt.horizontal.circle.fill" }
+        return "bolt.slash.circle"
+    }
+}
+
+private struct ContactRow: View {
+    let contact: Contact
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack(alignment: .bottomTrailing) {
+                Text(String(contact.displayName.prefix(1)).uppercased())
+                    .font(.headline)
+                    .frame(width: 38, height: 38)
+                    .background(Color.accentColor.opacity(0.16), in: Circle())
+                Circle()
+                    .fill(contact.presence.color)
+                    .frame(width: 11, height: 11)
+                    .overlay(Circle().stroke(.background, lineWidth: 2))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(contact.displayName).font(.headline)
+                Text("@\(contact.username) · \(contact.presence.label)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 3)
+    }
+}
+
+private struct FriendRequestRow: View {
+    let request: FriendRequest
+    let isMutating: Bool
+    let accept: () -> Void
+    let decline: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(request.fromDisplayName ?? request.fromUsername ?? "新用户")
+                .font(.headline)
+            if let username = request.fromUsername { Text("@\(username)").foregroundStyle(.secondary) }
+            if let message = request.message, !message.isEmpty { Text(message).font(.callout) }
+            HStack {
+                Button("接受", action: accept).buttonStyle(.borderedProminent)
+                Button("拒绝", action: decline)
+                if isMutating { ProgressView().controlSize(.small) }
+            }
+            .disabled(isMutating)
+        }
+        .padding(.vertical, 5)
+    }
+}
+
+private struct SendFriendRequestView: View {
+    @ObservedObject var model: ContactsViewModel
+    @Binding var isPresented: Bool
+    @State private var username = ""
+    @State private var message = ""
+
+    var body: some View {
+        Form {
+            TextField("对方的企鹅号", text: $username)
+            TextField("验证消息（可选）", text: $message)
+            Text("\(message.count)/140").font(.caption).foregroundStyle(message.count > 140 ? .red : .secondary)
+            if let error = model.errorMessage {
+                Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+            }
+            HStack {
+                Button("取消") { isPresented = false }
+                Spacer()
+                Button(model.isSendingRequest ? "发送中…" : "发送请求") {
+                    Task {
+                        if await model.sendRequest(username: username, message: message) {
+                            isPresented = false
+                        }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isSendingRequest || username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || message.count > 140)
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .frame(width: 420)
+    }
+}
+
+private extension Presence {
+    var label: String {
+        switch self { case .online: "在线"; case .away: "离开"; case .offline: "离线" }
+    }
+
+    var symbol: String {
+        switch self { case .online: "circle.fill"; case .away: "moon.fill"; case .offline: "circle" }
+    }
+
+    var color: Color {
+        switch self { case .online: .green; case .away: .orange; case .offline: .secondary }
     }
 }
