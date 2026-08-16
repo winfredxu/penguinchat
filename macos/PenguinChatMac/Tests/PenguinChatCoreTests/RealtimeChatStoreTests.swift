@@ -293,7 +293,8 @@ private func eventually(_ predicate: @escaping @Sendable () async -> Bool) async
 
     let snapshot = await store.snapshot()
     #expect(snapshot.presenceByUserID["bob"] == .online)
-    #expect(snapshot.messages[0].outboundState == .failed(reason: "acknowledgementTimedOut"))
+    // The failure reason is the redacted form, not `String(describing:)`.
+    #expect(snapshot.messages[0].outboundState == .failed(reason: "ack_timeout"))
     #expect(await transport.deliveredIDs == ["m-1"])
     #expect(await transport.readRequests.count == 1)
     #expect(await transport.typingRequests.count == 1)
@@ -425,4 +426,82 @@ private func eventually(_ predicate: @escaping @Sendable () async -> Bool) async
     let mine = await store.snapshot().messages.first { $0.serverID == "mine-1" }
     #expect(mine?.readAt == nil)
     await store.stop()
+}
+
+// MARK: - Manual reconnect (⇧⌘R / the offline banner)
+
+/// Hands out a fresh stream per `events()` call, the way the Socket.IO
+/// transport does. `FakeRealtimeTransport` shares one stream, which cannot be
+/// iterated twice — so it can't express a resubscribe.
+private actor ResubscribingTransport: RealtimeTransport {
+    private var continuation: AsyncStream<RealtimeEvent>.Continuation?
+    var connectedTokens: [String] = []
+    var subscriptions = 0
+
+    func events() async -> AsyncStream<RealtimeEvent> {
+        let (stream, continuation) = AsyncStream.makeStream(of: RealtimeEvent.self)
+        self.continuation?.finish()
+        self.continuation = continuation
+        subscriptions += 1
+        return stream
+    }
+
+    func connect(accessToken: String) async { connectedTokens.append(accessToken) }
+    func disconnect() async {}
+    func sendMessage(_ request: SendMessageRequest) async throws -> SendAcknowledgement {
+        throw RealtimeTransportError.notConnected
+    }
+    func confirmDelivered(messageID: String) async throws {}
+    func markRead(peerID: String, upToMessageID: String) async throws {}
+    func setTyping(_ isTyping: Bool, toUserID: String) async throws {}
+    func emit(_ event: RealtimeEvent) { continuation?.yield(event) }
+}
+
+/// After a full `stop()` the event task is gone, so reconnect has to
+/// re-subscribe as well as re-dial — otherwise the socket comes back but no
+/// events ever reach the store again.
+@Test func reconnectAfterStopRedialsAndResumesEventDelivery() async throws {
+    let transport = ResubscribingTransport()
+    let credentials = FakeRealtimeCredentials(accessToken: "token")
+    let store = RealtimeChatStore(
+        transport: transport,
+        credentials: credentials,
+        historyService: FakeMessageHistoryService(),
+        currentUserID: "alice"
+    )
+    try await store.start()
+    await store.stop()
+
+    await store.reconnect()
+    #expect(await transport.connectedTokens == ["token", "token"])
+    #expect(await transport.subscriptions == 2)
+
+    await transport.emit(.connection(.connected(isReconnect: false)))
+    try await eventually { await store.snapshot().connection == .connected(isReconnect: false) }
+
+    await transport.emit(.presence(PresenceUpdate(userID: "bob", status: .online)))
+    try await eventually { await store.snapshot().presenceByUserID["bob"] == .online }
+    await store.stop()
+}
+
+@Test func reconnectRefreshesAnExpiredAccessToken() async throws {
+    let transport = FakeRealtimeTransport()
+    let credentials = FakeRealtimeCredentials(accessToken: nil, refreshedToken: "fresh")
+    let store = makeStore(transport: transport, credentials: credentials, history: FakeMessageHistoryService())
+
+    await store.reconnect()
+    #expect(await credentials.refreshCount == 1)
+    #expect(await transport.connectedTokens == ["fresh"])
+    #expect(await store.snapshot().connection == .connecting)
+    await store.stop()
+}
+
+@Test func reconnectWithoutAnyCredentialReportsAuthenticationFailure() async throws {
+    let transport = FakeRealtimeTransport()
+    let credentials = FakeRealtimeCredentials(accessToken: nil)
+    let store = makeStore(transport: transport, credentials: credentials, history: FakeMessageHistoryService())
+
+    await store.reconnect()
+    #expect(await store.snapshot().connection == .authenticationFailed)
+    #expect(await transport.connectedTokens.isEmpty)
 }

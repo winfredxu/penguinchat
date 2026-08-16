@@ -131,6 +131,31 @@ public actor RealtimeChatStore {
         await transport.connect(accessToken: token)
     }
 
+    /// Manual recovery for the "实时连接离线" banner: re-dials with a fresh token
+    /// instead of waiting for Socket.IO's own backoff to run out of attempts.
+    public func reconnect() async {
+        var candidate = await credentials.realtimeAccessToken()
+        if candidate == nil { candidate = try? await credentials.refreshRealtimeAccessToken() }
+        guard let token = candidate else {
+            connection = .authenticationFailed
+            publishSnapshot()
+            return
+        }
+        RedactingLogger.realtime.info("manual reconnect requested")
+        connection = .connecting
+        publishSnapshot()
+        if eventTask == nil {
+            let stream = await transport.events()
+            eventTask = Task { [weak self] in
+                for await event in stream {
+                    guard !Task.isCancelled else { break }
+                    await self?.receive(event)
+                }
+            }
+        }
+        await transport.connect(accessToken: token)
+    }
+
     public func stop() async {
         eventTask?.cancel()
         eventTask = nil
@@ -217,7 +242,7 @@ public actor RealtimeChatStore {
             ))
             apply(acknowledgement, fallbackClientMessageID: clientMessageID)
         } catch {
-            updateOutbound(clientMessageID: clientMessageID, state: .failed(reason: String(describing: error)))
+            updateOutbound(clientMessageID: clientMessageID, state: .failed(reason: Redaction.describe(error)))
         }
         return clientMessageID
     }
@@ -233,7 +258,7 @@ public actor RealtimeChatStore {
             ))
             apply(acknowledgement, fallbackClientMessageID: clientMessageID)
         } catch {
-            updateOutbound(clientMessageID: clientMessageID, state: .failed(reason: String(describing: error)))
+            updateOutbound(clientMessageID: clientMessageID, state: .failed(reason: Redaction.describe(error)))
         }
     }
 
@@ -360,7 +385,7 @@ public actor RealtimeChatStore {
             connection = .connecting
             await transport.connect(accessToken: token)
         } catch {
-            connection = .failed(reason: String(describing: error))
+            connection = .failed(reason: Redaction.describe(error))
         }
     }
 

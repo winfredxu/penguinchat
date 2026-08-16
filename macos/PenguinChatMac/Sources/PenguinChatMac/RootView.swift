@@ -4,6 +4,7 @@ import SwiftUI
 
 struct RootView: View {
     let environment: AppEnvironment
+    @EnvironmentObject private var bus: AppCommandBus
     @StateObject private var authentication: AuthenticationModel
 
     init(environment: AppEnvironment) {
@@ -16,6 +17,7 @@ struct RootView: View {
             switch authentication.phase {
             case .restoring:
                 ProgressView("正在恢复安全会话…")
+                    .accessibilityLabel("正在恢复安全会话")
             case .signedOut:
                 AuthenticationView(
                     apiURL: environment.apiBaseURL,
@@ -26,13 +28,19 @@ struct RootView: View {
                     environment: environment,
                     session: session,
                     sessions: authentication.sessions,
+                    bus: bus,
                     isSigningOut: authentication.isSubmitting,
                     errorMessage: authentication.errorMessage,
                     onSignOut: { Task { await authentication.logout() } }
                 )
+                // A new shell (and a new realtime store) per signed-in user id.
+                .id(session.user.id)
             }
         }
         .task { await authentication.restore() }
+        .onChange(of: authentication.isSignedIn, initial: true) {
+            bus.isSignedIn = authentication.isSignedIn
+        }
     }
 }
 
@@ -180,27 +188,29 @@ private struct AuthenticationView: View {
 }
 
 private struct SessionShell: View {
-    private enum Destination: Hashable {
-        case conversations
-        case contacts
-        case requests
-    }
+    private typealias Destination = SidebarDestination
 
     let session: AuthenticatedSession
     let isSigningOut: Bool
     let errorMessage: String?
     let onSignOut: () -> Void
+    @EnvironmentObject private var bus: AppCommandBus
+    @Environment(\.controlActiveState) private var controlActiveState
     @StateObject private var model: ContactsViewModel
     @StateObject private var chat: ChatViewModel
+    @StateObject private var notifications: NotificationCoordinator
+    @State private var planner = NotificationPlanner()
     @State private var destination: Destination? = .conversations
     @State private var selectedContactID: String?
     @State private var selectedConversationID: String?
     @State private var showingSendRequest = false
+    @State private var composerFocusRequests = 0
 
     init(
         environment: AppEnvironment,
         session: AuthenticatedSession,
         sessions: SessionManager,
+        bus: AppCommandBus,
         isSigningOut: Bool,
         errorMessage: String?,
         onSignOut: @escaping () -> Void
@@ -209,6 +219,7 @@ private struct SessionShell: View {
         self.isSigningOut = isSigningOut
         self.errorMessage = errorMessage
         self.onSignOut = onSignOut
+        _notifications = StateObject(wrappedValue: NotificationCoordinator(bus: bus))
         let client = APIClient(baseURL: environment.apiBaseURL)
         let historyService = MessageHistoryService(client: client)
         let store = RealtimeChatStore(
@@ -230,20 +241,26 @@ private struct SessionShell: View {
         ))
     }
 
+    private var unreadTotal: Int { NotificationPlanner.totalUnread(in: chat.conversations) }
+
     var body: some View {
         NavigationSplitView {
             List(selection: $destination) {
                 Label("消息", systemImage: "bubble.left.and.bubble.right")
-                    .badge(chat.conversations.reduce(0) { $0 + $1.unreadCount })
+                    .badge(unreadTotal)
                     .tag(Destination.conversations)
+                    .accessibilityLabel(unreadTotal > 0 ? "消息，\(unreadTotal) 条未读" : "消息")
                 Label("联系人", systemImage: "person.2")
                     .badge(model.contacts.count)
                     .tag(Destination.contacts)
+                    .accessibilityLabel("联系人，\(model.contacts.count) 位")
                 Label("好友请求", systemImage: "person.crop.circle.badge.plus")
                     .badge(model.incomingRequests.count)
                     .tag(Destination.requests)
+                    .accessibilityLabel("好友请求，\(model.incomingRequests.count) 条待处理")
             }
             .navigationTitle("PenguinChat")
+            .accessibilityLabel("导航")
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 8) {
                     Divider()
@@ -251,9 +268,19 @@ private struct SessionShell: View {
                     Text("@\(session.user.username)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Label(connectionLabel, systemImage: connectionSymbol)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Label(connectionLabel, systemImage: connectionSymbol)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if isRealtimeOffline {
+                            Button("重新连接") { Task { await chat.reconnect() } }
+                                .buttonStyle(.link)
+                                .font(.caption)
+                                .accessibilityHint("重新建立实时消息连接")
+                        }
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("实时连接状态：\(connectionLabel)")
                     Button("退出登录", action: onSignOut)
                         .disabled(isSigningOut)
                 }
@@ -274,7 +301,11 @@ private struct SessionShell: View {
             .safeAreaInset(edge: .bottom) { statusBanner }
         } detail: {
             if destination == .conversations {
-                ChatDetailView(model: chat, currentUserID: session.user.id)
+                ChatDetailView(
+                    model: chat,
+                    currentUserID: session.user.id,
+                    focusRequests: composerFocusRequests
+                )
             } else {
                 contactDetail
             }
@@ -285,21 +316,89 @@ private struct SessionShell: View {
             } label: {
                 Label("添加好友", systemImage: "person.badge.plus")
             }
+            .help("发送好友请求（⇧⌘N）")
+            .accessibilityLabel("添加好友")
         }
         .sheet(isPresented: $showingSendRequest) {
             SendFriendRequestView(model: model, isPresented: $showingSendRequest)
         }
         .task {
+            await notifications.requestAuthorizationIfNeeded()
             async let contacts: Void = model.start()
             async let messages: Void = chat.start()
             _ = await (contacts, messages)
         }
         .onDisappear {
+            planner.reset()
+            notifications.updateBadge(unreadCount: 0)
             Task {
                 await chat.stop()
                 await model.stop()
             }
         }
+        .onReceive(bus.commands) { handle($0) }
+        .onChange(of: chat.conversations) { deliverUnreadSurfaces() }
+        .onChange(of: isAppActive) {
+            guard isAppActive else { return }
+            // Coming forward means the banners have been seen.
+            notifications.clearDelivered()
+            deliverUnreadSurfaces()
+        }
+        .onChange(of: chat.selectedPeerID, initial: true) {
+            bus.hasSelectedConversation = chat.selectedPeerID != nil
+            if let peerID = chat.selectedPeerID { notifications.clearDelivered(peerID: peerID) }
+        }
+    }
+
+    /// The app is "active" for notification purposes only when this window is
+    /// the key window — a background window still counts as not being looked at.
+    private var isAppActive: Bool { controlActiveState == .key }
+
+    private func deliverUnreadSurfaces() {
+        notifications.updateBadge(unreadCount: unreadTotal)
+        let pending = planner.plan(
+            conversations: chat.conversations,
+            currentUserID: session.user.id,
+            selectedPeerID: chat.selectedPeerID,
+            isAppActive: isAppActive
+        )
+        notifications.post(pending)
+    }
+
+    private func handle(_ command: AppCommand) {
+        switch command {
+        case .focusComposer:
+            destination = .conversations
+            composerFocusRequests += 1
+        case let .show(target):
+            destination = target
+        case let .selectAdjacentConversation(offset):
+            selectAdjacentConversation(offset: offset)
+        case let .openConversation(peerID):
+            destination = .conversations
+            selectedConversationID = peerID
+            Task { await chat.select(peerID: peerID) }
+        case .addFriend:
+            showingSendRequest = true
+        case .reconnect:
+            Task { await chat.reconnect() }
+        case .refresh:
+            Task { await model.reload(replacePresence: true) }
+        }
+    }
+
+    private func selectAdjacentConversation(offset: Int) {
+        let conversations = chat.conversations
+        guard !conversations.isEmpty else { return }
+        destination = .conversations
+        let currentIndex = conversations.firstIndex { $0.id == chat.selectedPeerID }
+        // No selection yet: ⇧⌘] opens the first thread, ⇧⌘[ the last.
+        let nextIndex = currentIndex.map { index in
+            (index + offset + conversations.count) % conversations.count
+        } ?? (offset > 0 ? 0 : conversations.count - 1)
+        let peerID = conversations[nextIndex].id
+        selectedConversationID = peerID
+        Task { await chat.select(peerID: peerID) }
     }
 
     @ViewBuilder
@@ -446,6 +545,15 @@ private struct SessionShell: View {
         if case .connected = model.connection { return "bolt.horizontal.circle.fill" }
         return "bolt.slash.circle"
     }
+
+    /// Offer manual reconnect only when waiting will not fix it on its own —
+    /// `.connecting`/`.reconnecting` still have Socket.IO backoff running.
+    private var isRealtimeOffline: Bool {
+        switch model.connection {
+        case .disconnected, .failed, .authenticationFailed: true
+        case .connected, .connecting, .reconnecting: false
+        }
+    }
 }
 
 private struct ConversationRow: View {
@@ -496,12 +604,25 @@ private struct ConversationRow: View {
             }
         }
         .padding(.vertical, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityDescription)
+    }
+
+    private var accessibilityDescription: String {
+        var parts = [conversation.peer.displayName, conversation.peer.presence.label]
+        if conversation.unreadCount > 0 { parts.append("\(conversation.unreadCount) 条未读") }
+        if let message = conversation.lastMessage {
+            parts.append(message.senderID == currentUserID ? "我：\(message.body)" : message.body)
+        }
+        return parts.joined(separator: "，")
     }
 }
 
 private struct ChatDetailView: View {
     @ObservedObject var model: ChatViewModel
     let currentUserID: String
+    /// Incremented by the ⌘L menu command; the value itself carries no meaning.
+    let focusRequests: Int
     @State private var draft = ""
     @FocusState private var composerFocused: Bool
 
@@ -523,6 +644,8 @@ private struct ChatDetailView: View {
                 )
             }
         }
+        .onChange(of: focusRequests) { composerFocused = true }
+        .onChange(of: model.selectedPeerID) { draft = "" }
     }
 
     private func header(_ conversation: ConversationSummary) -> some View {
@@ -610,27 +733,43 @@ private struct ChatDetailView: View {
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField("输入消息", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .textFieldStyle(.roundedBorder)
-                .focused($composerFocused)
-                .onChange(of: draft) { model.composerDidChange(draft) }
-                .onSubmit { submit() }
-            Button(action: submit) {
-                Image(systemName: "paperplane.fill")
-                    .frame(width: 24, height: 24)
+        VStack(alignment: .trailing, spacing: 4) {
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("输入消息", text: $draft, axis: .vertical)
+                    .lineLimit(1...5)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($composerFocused)
+                    .onChange(of: draft) { model.composerDidChange(draft) }
+                    .onSubmit { submit() }
+                    .accessibilityLabel("消息输入框")
+                    .accessibilityHint("按回车发送，⌘L 可随时聚焦")
+                Button(action: submit) {
+                    Image(systemName: "paperplane.fill")
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSend)
+                .keyboardShortcut(.return, modifiers: .command)
+                .help("发送消息（⌘⏎）")
+                .accessibilityLabel("发送消息")
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || draft.count > 4_000)
-            .keyboardShortcut(.return, modifiers: .command)
+            if draft.count > 3_600 {
+                Text("\(draft.count)/4000")
+                    .font(.caption2)
+                    .foregroundStyle(draft.count > 4_000 ? .red : .secondary)
+            }
         }
         .padding(12)
     }
 
+    private var canSend: Bool {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && draft.count <= 4_000
+    }
+
     private func submit() {
+        guard canSend else { return }
         let body = draft
-        guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         draft = ""
         Task {
             if !(await model.send(body)) { draft = body }
@@ -663,6 +802,24 @@ private struct MessageBubble: View {
             }
             if !isMine { Spacer(minLength: 80) }
         }
+        // One bubble reads as one element: sender, text, time, delivery state.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityDescription)
+    }
+
+    private var accessibilityDescription: String {
+        var parts = [isMine ? "我发送" : "对方发送", message.body, message.createdAt.chatTime]
+        if isMine {
+            switch message.outboundState {
+            case .pending: parts.append("发送中")
+            case .failed: parts.append("发送失败")
+            case .sent:
+                if message.readAt != nil { parts.append("已读") }
+                else if message.deliveredAt != nil { parts.append("已送达") }
+                else { parts.append("已发送") }
+            }
+        }
+        return parts.joined(separator: "，")
     }
 
     @ViewBuilder

@@ -132,7 +132,7 @@ public final class SocketIORealtimeTransport: @unchecked Sendable, RealtimeTrans
             }
         }
         socket.on(clientEvent: .error) { [weak self] data, _ in
-            let reason = data.map(String.init(describing:)).joined(separator: " ")
+            let reason = Redaction.redact(data.map(String.init(describing:)).joined(separator: " "))
             if reason.localizedCaseInsensitiveContains("unauthorized") {
                 self?.continuation?.yield(.connection(.authenticationFailed))
             } else {
@@ -158,7 +158,7 @@ public final class SocketIORealtimeTransport: @unchecked Sendable, RealtimeTrans
         do {
             continuation?.yield(event(try decode(type, from: first)))
         } catch {
-            continuation?.yield(.connection(.failed(reason: "malformed_event: \(error)")))
+            continuation?.yield(.connection(.failed(reason: "malformed_event: \(Redaction.describe(error))")))
         }
     }
 
@@ -188,7 +188,7 @@ public final class SocketIORealtimeTransport: @unchecked Sendable, RealtimeTrans
             let data = try JSONSerialization.data(withJSONObject: object)
             return try decoder.decode(type, from: data)
         } catch {
-            throw RealtimeTransportError.malformedPayload(String(describing: error))
+            throw RealtimeTransportError.malformedPayload(Redaction.describe(error))
         }
     }
 }

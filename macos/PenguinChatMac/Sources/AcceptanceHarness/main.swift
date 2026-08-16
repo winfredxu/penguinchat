@@ -329,6 +329,158 @@ do {
     report.check("history pagination against the live endpoint", false, detail: String(describing: error))
 }
 
+// MARK: - Restart restore through the real Keychain (WINL-7)
+
+// The other restore check uses an in-memory store, which proves the
+// SessionManager logic but not that a relaunched app finds its session. This
+// one writes to the actual Keychain — under a QA-only service name so the
+// shipping app's item is untouched — and reads it back through a brand new
+// SessionManager, which is what a cold launch does.
+do {
+    let service = "com.penguinchat.macos.acceptance.\(UUID().uuidString)"
+    let write = KeychainTokenStore(service: service, account: "current-session")
+    let first = SessionManager(
+        authService: AuthService(client: APIClient(baseURL: environment.apiBaseURL)),
+        credentialStore: write
+    )
+    _ = try await first.login(username: bob.username, password: password)
+
+    // A separate store instance over the same service = a new process.
+    let relaunched = SessionManager(
+        authService: AuthService(client: APIClient(baseURL: environment.apiBaseURL)),
+        credentialStore: KeychainTokenStore(service: service, account: "current-session")
+    )
+    let restored = try await relaunched.restore()
+    report.check(
+        "session persisted in the Keychain restores after a simulated restart",
+        restored?.user.id == bob.user.id,
+        detail: restored.map { "restored \($0.user.username)" } ?? "nothing restored"
+    )
+
+    try await relaunched.logout()
+    let afterLogout = try await KeychainTokenStore(service: service, account: "current-session").loadTokens()
+    report.check("sign-out removes the Keychain item", afterLogout == nil)
+    // Best effort: logout already deleted it, but never leave a QA item behind.
+    try? await write.deleteTokens()
+} catch {
+    report.check("Keychain restart restore", false, detail: Redaction.describe(error))
+}
+
+// MARK: - Manual reconnect and unread surfaces (WINL-7)
+
+// ⇧⌘R calls store.reconnect() — including after a full stop(), where the event
+// task has to be re-subscribed and not just re-dialed.
+await bob.store.stop()
+report.check(
+    "stop() reports the realtime connection offline",
+    await waitFor {
+        if case .connected = await bob.store.snapshot().connection { return false }
+        return true
+    }
+)
+await bob.store.reconnect()
+report.check(
+    "manual reconnect restores the connection after a full stop",
+    await waitFor(timeout: .seconds(20)) {
+        if case .connected = await bob.store.snapshot().connection { return true }
+        return false
+    }
+)
+
+// The Dock badge and notification decisions run off the same projection the UI
+// renders, so they are asserted against the live conversation rather than fakes.
+do {
+    let planner = NotificationPlanner()
+    let conversations = bob.chat.conversations
+    let seeded = planner.plan(
+        conversations: conversations,
+        currentUserID: bob.user.id,
+        selectedPeerID: nil,
+        isAppActive: false
+    )
+    report.check("the first projection after launch raises no notifications", seeded.isEmpty)
+
+    // Earlier sections left alice's thread selected on bob's side, which
+    // auto-marks arrivals read. Deselect so the probe lands as genuine unread.
+    await bob.chat.select(peerID: nil)
+    let unreadBefore = bob.chat.conversations.reduce(0) { $0 + $1.unreadCount }
+    _ = await alice.chat.select(peerID: bob.user.id)
+    let banner = "notification probe \(UUID().uuidString.prefix(6))"
+    _ = await alice.chat.send(banner)
+
+    let arrived = await waitFor {
+        bob.chat.conversations.contains { $0.lastMessage?.body == banner }
+    }
+    report.check("the probe message reaches the peer", arrived)
+
+    let pending = planner.plan(
+        conversations: bob.chat.conversations,
+        currentUserID: bob.user.id,
+        selectedPeerID: nil,
+        isAppActive: false
+    )
+    report.check(
+        "an unread message from an unselected thread plans one notification",
+        pending.count == 1 && pending.first?.body == banner,
+        detail: "planned \(pending.count)"
+    )
+    report.check(
+        "the notification is attributed to the sending peer",
+        pending.first?.peerID == alice.user.id
+    )
+
+    let repeated = planner.plan(
+        conversations: bob.chat.conversations,
+        currentUserID: bob.user.id,
+        selectedPeerID: nil,
+        isAppActive: false
+    )
+    report.check("a re-published snapshot does not notify twice", repeated.isEmpty)
+
+    let unreadAfter = bob.chat.conversations.reduce(0) { $0 + $1.unreadCount }
+    report.check(
+        "the unread total the Dock badge uses increases by one",
+        unreadAfter == unreadBefore + 1,
+        detail: "before=\(unreadBefore) after=\(unreadAfter)"
+    )
+    report.check(
+        "the badge label matches the unread total",
+        NotificationPlanner.badgeLabel(unreadCount: unreadAfter) == String(unreadAfter),
+        detail: NotificationPlanner.badgeLabel(unreadCount: unreadAfter) ?? "nil"
+    )
+
+    // Opening the thread clears both the unread count and the badge.
+    _ = await bob.chat.select(peerID: alice.user.id)
+    let cleared = await waitFor {
+        bob.chat.conversations.allSatisfy { $0.unreadCount == 0 }
+    }
+    report.check("selecting the thread clears the unread badge", cleared)
+    report.check(
+        "a zero unread total hides the Dock badge",
+        NotificationPlanner.badgeLabel(unreadCount: 0) == nil
+    )
+}
+
+// MARK: - Log and error redaction (WINL-7)
+
+// Failure reasons reach the UI and the log; a leaked token there would outlive
+// the session it belongs to.
+let secretToken = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJxYSJ9.s3cr3t-signature-value"
+let redactedError = Redaction.redact("connect failed: {\"token\": \"\(secretToken)\"}")
+report.check(
+    "redaction strips a token out of a diagnostic string",
+    !redactedError.contains(secretToken) && !redactedError.contains("s3cr3t"),
+    detail: redactedError
+)
+report.check(
+    "redaction strips an Authorization header",
+    !Redaction.redact("Authorization: Bearer \(secretToken)").contains(secretToken)
+)
+report.check(
+    "transport errors describe themselves without payloads",
+    Redaction.describe(RealtimeTransportError.notConnected) == "not_connected"
+)
+
 // MARK: - Teardown
 
 await alice.chat.stop()
@@ -336,6 +488,6 @@ await bob.chat.stop()
 await alice.store.stop()
 await bob.store.stop()
 
-report.note("conversation length: \(aliceMessages.count) messages")
+report.note("conversation length: \(await alice.store.snapshot().messages.count) messages")
 report.summarize()
 exit(report.failures.isEmpty ? 0 : 1)

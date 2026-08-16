@@ -1,0 +1,3 @@
+# Output of scripts/package-app.sh
+build/
+packaging/AppIcon.iconset/

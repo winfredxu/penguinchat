@@ -97,6 +97,12 @@ public final class ChatViewModel: ObservableObject {
         await stopTyping()
     }
 
+    /// Re-dials the realtime connection after an offline stretch.
+    public func reconnect() async {
+        errorMessage = nil
+        await store.reconnect()
+    }
+
     public func select(peerID: String?) async {
         guard peerID != selectedPeerID else { return }
         await stopTyping()
